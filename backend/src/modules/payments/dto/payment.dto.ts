@@ -33,3 +33,29 @@ export const verifyPaymentResponseSchema = z
   .strict();
 
 export type VerifyPaymentResponseDto = z.infer<typeof verifyPaymentResponseSchema>;
+
+export const requestRefundRequestSchema = z
+  .object({
+    orderId: z.string().uuid("Invalid orderId"),
+    amountMinor: z.number().int().positive().optional(),
+    reason: z.string().min(3).max(500).optional(),
+  })
+  .strict();
+
+export type RequestRefundRequestDto = z.infer<typeof requestRefundRequestSchema>;
+
+export const refundResponseSchema = z
+  .object({
+    id: z.string().uuid(),
+    orderId: z.string().uuid(),
+    amountMinor: z.number().int(),
+    currency: z.string(),
+    status: z.enum(["REFUND_PENDING", "REFUNDED", "FAILED"]),
+    reason: z.string().nullable().optional(),
+    requestedAt: z.string(),
+    completedAt: z.string().nullable().optional(),
+  })
+  .strict();
+
+export type RefundResponseDto = z.infer<typeof refundResponseSchema>;
+
