@@ -1,4 +1,5 @@
 import { prisma } from "../../database/prisma.js";
+import type { Prisma } from "../../generated/prisma/client.js";
 import {
   BadRequestError,
   NotFoundError,
@@ -10,6 +11,7 @@ import type {
   InitializePaymentRequestDto,
   InitializePaymentResponseDto,
   VerifyPaymentResponseDto,
+  RefundResponseDto,
 } from "./dto/payment.dto.js";
 
 export class PaymentsService {
@@ -84,7 +86,7 @@ export class PaymentsService {
       where: { providerReference: reference },
       include: {
         order: {
-          include: { customer: true },
+          include: { customer: true, refund: true },
         },
       },
     });
@@ -178,12 +180,14 @@ export class PaymentsService {
       event: z.string().min(1),
       data: z
         .object({
-          reference: z.string().min(1),
-          status: z.string().min(1),
-          amount: z.number().int().positive(),
-          currency: z.literal("NGN"),
+          reference: z.string().min(1).optional(),
+          transaction_reference: z.string().optional(),
+          status: z.string().min(1).optional(),
+          amount: z.number().int().positive().optional(),
+          currency: z.literal("NGN").optional(),
           paid_at: z.string().nullable().optional(),
           channel: z.string().nullable().optional(),
+          id: z.union([z.number(), z.string()]).optional(),
         })
         .passthrough(),
     });
@@ -196,7 +200,8 @@ export class PaymentsService {
 
     const event = parsed.data;
 
-    if (event.event === "charge.success" && event.data.status === "success") {
+    // 1. Charge Success Event
+    if (event.event === "charge.success" && event.data.status === "success" && event.data.reference) {
       const payment = await prisma.payment.findUnique({
         where: { providerReference: event.data.reference },
       });
@@ -213,7 +218,7 @@ export class PaymentsService {
       const expectedAmountMinor = Math.round(Number(payment.amount) * 100);
 
       // Security check: Webhook amount must match expected amount
-      if (event.data.amount !== expectedAmountMinor) {
+      if (event.data.amount && event.data.amount !== expectedAmountMinor) {
         await prisma.payment.update({
           where: { id: payment.id },
           data: {
@@ -229,7 +234,7 @@ export class PaymentsService {
       }
 
       // Security check: Webhook currency must match payment currency
-      if (event.data.currency !== payment.currency) {
+      if (event.data.currency && event.data.currency !== payment.currency) {
         await prisma.payment.update({
           where: { id: payment.id },
           data: {
@@ -245,20 +250,167 @@ export class PaymentsService {
       }
 
       await this.processPaymentSuccess(payment.id, payment.orderId, {
-        amountMinor: event.data.amount,
+        amountMinor: event.data.amount || expectedAmountMinor,
         paidAt: event.data.paid_at ? new Date(event.data.paid_at) : new Date(),
+        transactionId: event.data.id,
       });
+    }
+
+    // 2. Refund Events
+    if (event.event === "refund.processed" || event.event === "refund.failed") {
+      const refIdentifier = event.data.reference || event.data.transaction_reference;
+      if (refIdentifier) {
+        const refund = await prisma.refund.findFirst({
+          where: {
+            OR: [
+              { providerReference: refIdentifier },
+              { order: { payment: { providerReference: refIdentifier } } },
+            ],
+          },
+        });
+
+        if (refund) {
+          const isProcessed = event.event === "refund.processed";
+          await prisma.refund.update({
+            where: { id: refund.id },
+            data: {
+              status: isProcessed ? "REFUNDED" : "FAILED",
+              completedAt: isProcessed ? new Date() : null,
+              providerResponse: event.data as Prisma.InputJsonValue,
+            },
+          });
+
+          await prisma.auditLog.create({
+            data: {
+              action: "REFUND",
+              entityType: "Refund",
+              entityId: refund.id,
+              after: {
+                status: isProcessed ? "REFUNDED" : "FAILED",
+                providerEvent: event.event,
+              },
+            },
+          });
+        }
+      }
     }
 
     return { received: true };
   }
 
+  async requestRefund(
+    actorUserId: string,
+    orderId: string,
+    amountMinor?: number,
+    reason?: string
+  ): Promise<RefundResponseDto> {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { payment: true, refund: true },
+    });
+
+    if (!order) {
+      throw new NotFoundError("Order not found");
+    }
+
+    if (!order.payment || order.payment.status !== "SUCCESS") {
+      throw new BadRequestError("Only orders with verified, successful payments can be refunded");
+    }
+
+    if (order.refund) {
+      if (order.refund.status === "REFUNDED") {
+        throw new BadRequestError("This order has already been fully refunded");
+      }
+      if (order.refund.status === "REFUND_PENDING") {
+        throw new BadRequestError("A refund is already pending for this order");
+      }
+    }
+
+    const totalPaidMinor = Math.round(Number(order.payment.amount) * 100);
+    const refundAmountMinor = amountMinor ?? totalPaidMinor;
+
+    if (refundAmountMinor <= 0) {
+      throw new BadRequestError("Refund amount must be a positive integer");
+    }
+
+    if (refundAmountMinor > totalPaidMinor) {
+      throw new BadRequestError(
+        `Refund amount (${refundAmountMinor} kobo) cannot exceed original payment amount (${totalPaidMinor} kobo)`
+      );
+    }
+
+    const refund = await prisma.$transaction(async (tx) => {
+      const createdRefund = await tx.refund.upsert({
+        where: { orderId: order.id },
+        create: {
+          orderId: order.id,
+          amount: refundAmountMinor / 100,
+          currency: "NGN",
+          status: "REFUND_PENDING",
+          reason: reason ?? "Administrative refund",
+        },
+        update: {
+          amount: refundAmountMinor / 100,
+          currency: "NGN",
+          status: "REFUND_PENDING",
+          reason: reason ?? "Administrative refund",
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          actorUserId,
+          action: "REFUND",
+          entityType: "Order",
+          entityId: order.id,
+          metadata: {
+            paymentId: order.payment?.id,
+            refundAmountMinor,
+            reason: reason ?? "Administrative refund",
+          },
+        },
+      });
+
+      return createdRefund;
+    });
+
+    // Call Paystack refund provider API
+    const paystackRefundResult = await paystackService.createRefund({
+      transactionReferenceOrId: order.payment.providerReference,
+      amountMinor: refundAmountMinor,
+      merchantNote: reason,
+    });
+
+    const isCompleted = paystackRefundResult.status === "processed";
+    const updatedRefund = await prisma.refund.update({
+      where: { id: refund.id },
+      data: {
+        status: isCompleted ? "REFUNDED" : "REFUND_PENDING",
+        providerReference: paystackRefundResult.reference,
+        completedAt: isCompleted ? (paystackRefundResult.refundedAt ?? new Date()) : null,
+        providerResponse: paystackRefundResult.rawResponse as Prisma.InputJsonValue,
+      },
+    });
+
+    return {
+      id: updatedRefund.id,
+      orderId: updatedRefund.orderId,
+      amountMinor: Math.round(Number(updatedRefund.amount) * 100),
+      currency: updatedRefund.currency,
+      status: updatedRefund.status,
+      reason: updatedRefund.reason,
+      requestedAt: updatedRefund.requestedAt.toISOString(),
+      completedAt: updatedRefund.completedAt ? updatedRefund.completedAt.toISOString() : null,
+    };
+  }
+
   private async processPaymentSuccess(
     paymentId: string,
     orderId: string,
-    verifyResult: { paidAt?: Date; amountMinor: number }
+    verifyResult: { paidAt?: Date | undefined; amountMinor: number; transactionId?: string | number | undefined }
   ) {
     const paidAt = verifyResult.paidAt || new Date();
+    const providerTransactionId = verifyResult.transactionId ? String(verifyResult.transactionId) : undefined;
     let customerUserId: string | null = null;
     let orderNumber: string | null = null;
 
@@ -273,6 +425,7 @@ export class PaymentsService {
         data: {
           status: "SUCCESS",
           paidAt,
+          ...(providerTransactionId ? { providerTransactionId } : {}),
         },
       });
 
@@ -284,15 +437,41 @@ export class PaymentsService {
       // 2. Fetch order to inspect status and calculate delivery
       const order = await tx.order.findUnique({
         where: { id: orderId },
-        include: { customer: true },
+        include: { customer: true, refund: true },
       });
       if (!order) return;
 
       customerUserId = order.customer.userId;
       orderNumber = order.orderNumber;
 
-      // 3. Safety guard: Validate order state before confirmation
-      // If the order was already cancelled, rejected, or refunded, do NOT revive it to CONFIRMED.
+      // 3. Safety guard: Validate refund state before confirmation
+      // If a refund has already been completed or is pending, do NOT confirm the order!
+      if (order.refund && (order.refund.status === "REFUNDED" || order.refund.status === "REFUND_PENDING")) {
+        await tx.orderStatusHistory.create({
+          data: {
+            orderId,
+            fromStatus: order.status,
+            toStatus: order.status,
+            reason: `Payment received after order was marked for refund (${order.refund.status}). Order remains ${order.status}; reconciliation required.`,
+          },
+        });
+        await tx.payment.update({
+          where: { id: paymentId },
+          data: {
+            providerResponse: {
+              reconciliationRequired: true,
+              refundStatus: order.refund.status,
+              reason: "Payment verified but order has refund record",
+              amountMinor: verifyResult.amountMinor,
+              paidAt: paidAt.toISOString(),
+            },
+          },
+        });
+        return;
+      }
+
+      // 4. Safety guard: Validate terminal order states before confirmation
+      // If the order was already cancelled or rejected, do NOT revive it to CONFIRMED.
       if (order.status === "CANCELLED" || order.status === "REJECTED") {
         await tx.orderStatusHistory.create({
           data: {
@@ -317,18 +496,18 @@ export class PaymentsService {
         return;
       }
 
-      // If the order is already confirmed or in progress, avoid duplicate status history
+      // If the order is already confirmed or in progress, avoid duplicate status history and delivery
       if (order.status !== "PENDING_PAYMENT" && order.status !== "PENDING") {
         return;
       }
 
-      // 4. Transition Order to CONFIRMED
+      // 5. Transition Order to CONFIRMED
       await tx.order.update({
         where: { id: orderId },
         data: { status: "CONFIRMED" },
       });
 
-      // 5. Add Order Status History
+      // 6. Add Order Status History
       await tx.orderStatusHistory.create({
         data: {
           orderId,
@@ -338,39 +517,51 @@ export class PaymentsService {
         },
       });
 
-      // 6. Create or ready the Delivery record
+      // 7. Create initial Delivery record in non-dispatchable PENDING state
+      // Note: The delivery is NOT marked READY until the restaurant explicitly finishes preparation!
       const riderEarnings = Number(order.deliveryFee) - Number(order.deliveryCommission);
 
       await tx.delivery.upsert({
         where: { orderId },
         create: {
           orderId,
-          status: "READY",
+          status: "PENDING",
           deliveryFee: order.deliveryFee,
           choviaCommission: order.deliveryCommission,
           riderEarnings: Math.max(0, riderEarnings),
           deliveryDistanceKm: order.deliveryDistanceKm,
         },
         update: {
-          status: "READY",
+          // If already existing in pre-confirmation state, keep as PENDING
+          status: "PENDING",
+        },
+      });
+
+      // 8. Transactional Outbox: Durably schedule post-payment notification event
+      // Guarantees reliable eventual delivery without losing notifications even if queues are temporarily down
+      await tx.outboxEvent.create({
+        data: {
+          eventType: "ORDER_CONFIRMED_NOTIFICATION",
+          aggregateType: "ORDER",
+          aggregateId: orderId,
+          payload: {
+            userId: customerUserId,
+            title: "Order Confirmed",
+            body: `Your payment for order #${orderNumber} was successful. The restaurant is preparing your food.`,
+            data: { orderId },
+          },
+          status: "PENDING",
         },
       });
     });
 
+    // Best-effort immediate dispatch from outbox to avoid waiting for cron if workers are active
     if (customerUserId && orderNumber) {
       try {
-        const { enqueuePushNotification, enqueueDeliveryTimeoutCheck } = await import(
-          "../../jobs/queues/index.js"
-        );
-        await enqueuePushNotification({
-          userId: customerUserId,
-          title: "Order Confirmed",
-          body: `Your payment for order #${orderNumber} was successful. The restaurant is preparing your food.`,
-          data: { orderId },
-        });
-        await enqueueDeliveryTimeoutCheck({ orderId, deliveryId: orderId }, 15 * 60 * 1000);
+        const { outboxDispatcher } = await import("../../jobs/outbox/outbox.dispatcher.js");
+        await outboxDispatcher.dispatchPendingEvents();
       } catch {
-        // Asynchronous queue failure does not affect committed transaction
+        // Safe: outbox record is already durably committed to PostgreSQL
       }
     }
   }

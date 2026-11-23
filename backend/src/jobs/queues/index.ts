@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { Queue } from "bullmq";
 import { env } from "../../config/env.js";
 import { parseRedisUrl } from "../../cache/redis.js";
@@ -12,6 +13,15 @@ import type {
 
 function getQueueConnection() {
   return parseRedisUrl(env.REDIS_URL);
+}
+
+export function createOpaqueJobId(prefix: string, ...inputs: (string | number)[]): string {
+  const digest = crypto
+    .createHash("sha256")
+    .update(inputs.join(":"))
+    .digest("hex")
+    .slice(0, 24);
+  return `${prefix}_${digest}`;
 }
 
 let emailQueue: Queue | null = null;
@@ -74,7 +84,7 @@ export async function enqueueVerificationEmail(data: SendVerificationEmailJobDat
     throw new Error("Email queue is unavailable");
   }
   await queue.add(JOB_NAMES.SEND_VERIFICATION_EMAIL, data, {
-    jobId: `email_verify_${data.email}_${data.otp}`,
+    jobId: createOpaqueJobId("email_verify", data.email, Date.now()),
   });
 }
 
@@ -84,7 +94,7 @@ export async function enqueuePasswordResetEmail(data: SendPasswordResetEmailJobD
     throw new Error("Email queue is unavailable");
   }
   await queue.add(JOB_NAMES.SEND_PASSWORD_RESET_EMAIL, data, {
-    jobId: `email_reset_${data.email}_${data.otp}`,
+    jobId: createOpaqueJobId("email_reset", data.email, Date.now()),
   });
 }
 
@@ -94,7 +104,7 @@ export async function enqueueStaffInviteEmail(data: SendStaffInviteEmailJobData)
     throw new Error("Email queue is unavailable");
   }
   await queue.add(JOB_NAMES.SEND_STAFF_INVITE_EMAIL, data, {
-    jobId: `email_invite_${data.email}_${data.inviteToken}`,
+    jobId: createOpaqueJobId("email_invite", data.email, Date.now()),
   });
 }
 
@@ -106,7 +116,7 @@ export async function enqueuePushNotification(data: SendPushNotificationJobData)
   const targetRef = data.data?.orderId || data.data?.deliveryId || "direct";
   const slug = data.title.toLowerCase().replace(/[^a-z0-9]/g, "_");
   await queue.add(JOB_NAMES.SEND_PUSH_NOTIFICATION, data, {
-    jobId: `notif_${data.userId}_${slug}_${targetRef}`,
+    jobId: createOpaqueJobId("notif", data.userId, slug, String(targetRef), Date.now()),
   });
 }
 
@@ -116,7 +126,7 @@ export async function enqueueDeliveryTimeoutCheck(data: CheckDeliveryTimeoutJobD
     throw new Error("Delivery queue is unavailable");
   }
   await queue.add(JOB_NAMES.CHECK_DELIVERY_TIMEOUT, data, {
-    jobId: `delivery_timeout_${data.deliveryId}_stage1`,
+    jobId: createOpaqueJobId("delivery_dispatch", data.deliveryId, Date.now()),
     delay: delayMs,
   });
 }

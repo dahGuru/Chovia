@@ -1,10 +1,10 @@
 # CHOVIA — Backend API Documentation
 
 > **Document:** API Endpoint Catalogue, Transport Contracts, and OpenAPI Specification  
-> **Status:** Production-Ready MVP Implementation  
+> **Status:** Implemented MVP (Automated tests pass; requires staging verification)  
 > **Base URL:** `http://localhost:4000/api/v1`  
 > **Interactive Documentation (Swagger UI):** `http://localhost:4000/api/docs`  
-> **OpenAPI JSON Spec:** `http://localhost:4000/api/docs/json`  
+> **OpenAPI 3.1 Spec:** `http://localhost:4000/api/docs/json`  
 
 ---
 
@@ -29,7 +29,7 @@ When an operation fails (validation error, resource missing, forbidden action, s
 {
   "statusCode": 400,
   "error": {
-    "code": "BAD_REQUEST",
+    "code": "VALIDATION_ERROR",
     "message": "Validation failed",
     "details": [
       {
@@ -42,12 +42,14 @@ When an operation fails (validation error, resource missing, forbidden action, s
 ```
 
 Standard error codes:
-- `BAD_REQUEST` (400): Malformed input, validation failure, business rule violation.
+- `VALIDATION_ERROR` (400): Schema validation failure on request body, query string, or path parameters.
+- `BAD_REQUEST` (400): Business rule violation, invalid state transition, or malformed data.
 - `UNAUTHORIZED` (401): Missing, malformed, or expired JWT access token.
 - `FORBIDDEN` (403): Account suspended, role unauthorized, or resource ownership mismatch.
 - `NOT_FOUND` (404): Requested entity does not exist.
 - `CONFLICT` (409): Resource already exists (e.g. email or phone number in use).
 - `TOO_MANY_REQUESTS` (429): Rate limit exceeded (>100 requests per minute).
+- `PAYMENT_GATEWAY_ERROR` (502): External payment provider outage or upstream gateway error.
 - `INTERNAL_SERVER_ERROR` (500): Unexpected runtime exception (masked in production).
 
 ---
@@ -69,7 +71,7 @@ Standard error codes:
 
 ---
 
-### 2.2 Users & Devices Module (`/api/v1/users`)
+### 2.2 Users & Media Module (`/api/v1/users`)
 
 | Method | Endpoint | Auth | Roles | Description |
 |---|---|---|---|---|
@@ -77,6 +79,9 @@ Standard error codes:
 | `PATCH` | `/users/profile` | Bearer | All | Update user name, phone number, and avatar image URL |
 | `POST` | `/users/devices` | Bearer | All | Register or update user client device (Expo Push token, device model, OS) |
 | `GET` | `/users/devices` | Bearer | All | List all active devices registered to the authenticated user |
+| `POST` | `/users/upload-signature` | Bearer | All | Generate signed Cloudinary upload parameters for avatars, menu, restaurants, or documents |
+| `POST` | `/users/upload-image` | Bearer | All | Direct backend upload with magic byte sniffing, format validation, and Cloudinary upload |
+| `POST` | `/users/verify-upload` | Bearer | All | Verify client-uploaded asset metadata against folder policies, format restrictions, and size limits |
 
 ---
 
@@ -160,8 +165,9 @@ Standard error codes:
 | Method | Endpoint | Auth | Roles | Description |
 |---|---|---|---|---|
 | `POST` | `/payments/initialize` | Bearer | Customer | Initialize Paystack transaction for pending order; returns checkout URL and reference |
-| `GET` | `/payments/verify/:reference` | Bearer | Customer, Admin | Verify Paystack transaction status and confirm payment transition to CONFIRMED |
-| `POST` | `/payments/webhook` | None | Public | Ingest Paystack webhook events; verifies HMAC-SHA512 `x-paystack-signature` header |
+| `GET` | `/payments/verify/:reference` | Bearer | Customer, Admin | Verify Paystack transaction status; enforces customer ownership and confirms transition to CONFIRMED |
+| `POST` | `/payments/webhook` | None | Public | Ingest Paystack webhook events (`charge.success`, `refund.processed`, `refund.failed`); verifies HMAC-SHA512 `x-paystack-signature` header |
+| `POST` | `/payments/refund` | Bearer | Admin | Administratively initiate full or partial order refund via Paystack; logs audit trail and reconciles refund record |
 
 ---
 

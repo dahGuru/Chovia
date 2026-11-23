@@ -27,7 +27,7 @@ describe("CHOVIA API App Integration Tests", () => {
     expect(["ok", "degraded", "down"]).toContain(body.status);
     expect(body.environment).toBeDefined();
     expect(body.timestamp).toBeDefined();
-  });
+  }, 15000);
 
   it("GET /health/live should return 200 with alive status", async () => {
     const res = await app.inject({

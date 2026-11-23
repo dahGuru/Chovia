@@ -1,7 +1,11 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import crypto from "node:crypto";
-import { describe, it, expect } from "vitest";
-import { PaystackService } from "../integrations/paystack/paystack.service.js";
-import { BadRequestError } from "../common/errors/api-error.js";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { PaystackService, paystackService } from "../integrations/paystack/paystack.service.js";
+import { paymentsService } from "../modules/payments/payments.service.js";
+import { prisma } from "../database/prisma.js";
+import { outboxDispatcher } from "../jobs/outbox/outbox.dispatcher.js";
+import { BadRequestError, ForbiddenError, NotFoundError } from "../common/errors/api-error.js";
 
 describe("Paystack Payment Integration & Webhook Security", () => {
   const secretKey = "sk_test_mock_paystack_secret_key_123456";
@@ -278,12 +282,654 @@ describe("Paystack Payment Integration & Webhook Security", () => {
     }
   });
 
-  it("should safely guard against reviving terminal orders (CANCELLED, REFUNDED, REJECTED)", () => {
-    const terminalStatuses = ["CANCELLED", "REFUNDED", "REJECTED"];
-    for (const status of terminalStatuses) {
-      const isTerminal = ["CANCELLED", "REFUNDED", "REJECTED"].includes(status);
-      expect(isTerminal).toBe(true);
+  it("should verify Paystack initialization requires matching reference and valid URL", async () => {
+    const customPaystack = new PaystackService({
+      secretKey: "sk_test_mock_1234567890abcdef",
+      isMock: false,
+    });
+
+    const originalFetch = globalThis.fetch;
+    // 1. Success with matching reference
+    globalThis.fetch = (async () => {
+      return new Response(
+        JSON.stringify({
+          status: true,
+          data: {
+            authorization_url: "https://checkout.paystack.com/auth-123",
+            access_code: "code_123",
+            reference: "CHV-PAY-INIT-MATCH",
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const successResult = await customPaystack.initializeTransaction({
+      email: "customer@example.com",
+      amountMinor: 250000,
+      reference: "CHV-PAY-INIT-MATCH",
+    });
+    expect(successResult.reference).toBe("CHV-PAY-INIT-MATCH");
+    expect(successResult.authorizationUrl).toBe("https://checkout.paystack.com/auth-123");
+
+    // 2. Failure with mismatched reference
+    globalThis.fetch = (async () => {
+      return new Response(
+        JSON.stringify({
+          status: true,
+          data: {
+            authorization_url: "https://checkout.paystack.com/auth-456",
+            access_code: "code_456",
+            reference: "DIFFERENT-REF-FROM-PROVIDER",
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    await expect(
+      customPaystack.initializeTransaction({
+        email: "customer@example.com",
+        amountMinor: 250000,
+        reference: "CHV-PAY-INIT-MATCH",
+      })
+    ).rejects.toThrow(/reference mismatch/i);
+
+    // 3. Failure on HTTP 500 server error
+    globalThis.fetch = (async () => {
+      return new Response("Internal Server Error", { status: 500 });
+    }) as typeof fetch;
+
+    await expect(
+      customPaystack.initializeTransaction({
+        email: "customer@example.com",
+        amountMinor: 250000,
+        reference: "CHV-PAY-INIT-MATCH",
+      })
+    ).rejects.toThrow(/initialization failed with status 500/i);
+
+    globalThis.fetch = originalFetch;
+  });
+
+  it("should distinguish provider 5xx outages from genuine transaction failures during verification", async () => {
+    const customPaystack = new PaystackService({
+      secretKey: "sk_test_mock_1234567890abcdef",
+      isMock: false,
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      return new Response("Bad Gateway", { status: 502 });
+    }) as typeof fetch;
+
+    try {
+      await expect(
+        customPaystack.verifyTransaction("CHV-PAY-502-OUTAGE", 100000)
+      ).rejects.toThrow(/service temporarily unavailable/i);
+    } finally {
+      globalThis.fetch = originalFetch;
     }
-    expect(["CANCELLED", "REFUNDED", "REJECTED"].includes("PENDING_PAYMENT")).toBe(false);
+  });
+
+  it("should process Paystack refund transactions and validate response envelope", async () => {
+    const customPaystack = new PaystackService({
+      secretKey: "sk_test_mock_1234567890abcdef",
+      isMock: false,
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      return new Response(
+        JSON.stringify({
+          status: true,
+          data: {
+            id: 998877,
+            transaction: "CHV-PAY-REFUND-1",
+            reference: "CHV-REF-12345",
+            amount: 150000,
+            currency: "NGN",
+            status: "processed",
+            refunded_at: new Date().toISOString(),
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    try {
+      const refundResult = await customPaystack.createRefund({
+        transactionReferenceOrId: "CHV-PAY-REFUND-1",
+        amountMinor: 150000,
+        merchantNote: "Customer cancelled before preparation",
+      });
+
+      expect(refundResult.status).toBe("processed");
+      expect(refundResult.refundId).toBe(998877);
+      expect(refundResult.amountMinor).toBe(150000);
+      expect(refundResult.currency).toBe("NGN");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe("PaymentsService Workflow & State Machine", () => {
+  beforeEach(() => {
+    vi.spyOn(outboxDispatcher, "dispatchPendingEvents").mockResolvedValue(0);
+  });
+  it("should reject verifyPayment when requesting user does not own the order", async () => {
+    const findUniqueSpy = vi.spyOn(prisma.payment, "findUnique").mockResolvedValueOnce({
+      id: "pay_1",
+      orderId: "ord_1",
+      providerReference: "CHV-PAY-REF-1",
+      amount: "5000.00" as any,
+      currency: "NGN",
+      status: "PENDING",
+      paidAt: null,
+      providerTransactionId: null,
+      providerResponse: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      order: {
+        id: "ord_1",
+        customer: { userId: "usr_legitimate_customer" },
+        refund: null,
+      },
+    } as any);
+
+    try {
+      await expect(
+        paymentsService.verifyPayment("usr_unauthorized_attacker", "CHV-PAY-REF-1")
+      ).rejects.toThrow(ForbiddenError);
+    } finally {
+      findUniqueSpy.mockRestore();
+    }
+  });
+
+  it("should not revive CANCELLED or REJECTED orders to CONFIRMED and record reconciliation note", async () => {
+    const paymentRecord = {
+      id: "pay_cancelled",
+      orderId: "ord_cancelled",
+      providerReference: "CHV-PAY-CANCELLED",
+      amount: "4500.00" as any,
+      currency: "NGN",
+      status: "PENDING",
+      paidAt: null,
+      order: {
+        id: "ord_cancelled",
+        status: "CANCELLED",
+        orderNumber: "CHV-ORD-8888",
+        customer: { userId: "usr_cust_1" },
+        refund: null,
+      },
+    };
+
+    const findUniqueSpy = vi.spyOn(prisma.payment, "findUnique").mockResolvedValueOnce(paymentRecord as any);
+    const verifySpy = vi.spyOn(paystackService, "verifyTransaction").mockResolvedValueOnce({
+      status: "success",
+      amountMinor: 450000,
+      currency: "NGN",
+      paidAt: new Date(),
+      transactionId: "paystack_tx_999",
+    });
+
+    const txOrderUpdateSpy = vi.fn();
+    const txDeliveryUpsertSpy = vi.fn();
+    const txOrderStatusHistorySpy = vi.fn().mockResolvedValue({});
+    const txPaymentUpdateSpy = vi.fn().mockResolvedValue({});
+
+    const mockTx = {
+      payment: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        update: txPaymentUpdateSpy,
+      },
+      order: {
+        findUnique: vi.fn().mockResolvedValue(paymentRecord.order),
+        update: txOrderUpdateSpy,
+      },
+      orderStatusHistory: {
+        create: txOrderStatusHistorySpy,
+      },
+      delivery: {
+        upsert: txDeliveryUpsertSpy,
+      },
+      outboxEvent: {
+        create: vi.fn().mockResolvedValue({}),
+      },
+    };
+
+    const txSpy = vi.spyOn(prisma, "$transaction").mockImplementationOnce(async (cb: any) => {
+      return cb(mockTx);
+    });
+
+    try {
+      const result = await paymentsService.verifyPayment("usr_cust_1", "CHV-PAY-CANCELLED");
+      expect(result.status).toBe("SUCCESS");
+
+      // Verify order status was NOT changed to CONFIRMED
+      expect(txOrderUpdateSpy).not.toHaveBeenCalled();
+      // Verify delivery was NOT created
+      expect(txDeliveryUpsertSpy).not.toHaveBeenCalled();
+
+      // Verify reconciliation history was created
+      expect(txOrderStatusHistorySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            orderId: "ord_cancelled",
+            fromStatus: "CANCELLED",
+            toStatus: "CANCELLED",
+            reason: expect.stringContaining("terminal status"),
+          }),
+        })
+      );
+
+      // Verify payment was updated with reconciliation required
+      expect(txPaymentUpdateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            providerResponse: expect.objectContaining({
+              reconciliationRequired: true,
+              orderStatus: "CANCELLED",
+            }),
+          }),
+        })
+      );
+    } finally {
+      findUniqueSpy.mockRestore();
+      verifySpy.mockRestore();
+      txSpy.mockRestore();
+    }
+  }, 15000);
+
+  it("should not revive order with existing REFUNDED or REFUND_PENDING refund to CONFIRMED", async () => {
+    const paymentRecord = {
+      id: "pay_refunded",
+      orderId: "ord_refunded",
+      providerReference: "CHV-PAY-REFUNDED",
+      amount: "6000.00" as any,
+      currency: "NGN",
+      status: "PENDING",
+      paidAt: null,
+      order: {
+        id: "ord_refunded",
+        status: "CONFIRMED",
+        orderNumber: "CHV-ORD-7777",
+        customer: { userId: "usr_cust_2" },
+        refund: { status: "REFUNDED", id: "ref_1" },
+      },
+    };
+
+    const findUniqueSpy = vi.spyOn(prisma.payment, "findUnique").mockResolvedValueOnce(paymentRecord as any);
+    const verifySpy = vi.spyOn(paystackService, "verifyTransaction").mockResolvedValueOnce({
+      status: "success",
+      amountMinor: 600000,
+      currency: "NGN",
+      paidAt: new Date(),
+      transactionId: "paystack_tx_888",
+    });
+
+    const txOrderUpdateSpy = vi.fn();
+    const txOrderStatusHistorySpy = vi.fn().mockResolvedValue({});
+    const txPaymentUpdateSpy = vi.fn().mockResolvedValue({});
+
+    const mockTx = {
+      payment: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        update: txPaymentUpdateSpy,
+      },
+      order: {
+        findUnique: vi.fn().mockResolvedValue(paymentRecord.order),
+        update: txOrderUpdateSpy,
+      },
+      orderStatusHistory: {
+        create: txOrderStatusHistorySpy,
+      },
+    };
+
+    const txSpy = vi.spyOn(prisma, "$transaction").mockImplementationOnce(async (cb: any) => {
+      return cb(mockTx);
+    });
+
+    try {
+      await paymentsService.verifyPayment("usr_cust_2", "CHV-PAY-REFUNDED");
+
+      expect(txOrderUpdateSpy).not.toHaveBeenCalled();
+      expect(txOrderStatusHistorySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            reason: expect.stringContaining("refund"),
+          }),
+        })
+      );
+      expect(txPaymentUpdateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            providerResponse: expect.objectContaining({
+              reconciliationRequired: true,
+              refundStatus: "REFUNDED",
+            }),
+          }),
+        })
+      );
+    } finally {
+      findUniqueSpy.mockRestore();
+      verifySpy.mockRestore();
+      txSpy.mockRestore();
+    }
+  });
+
+  it("should transition PENDING_PAYMENT order to CONFIRMED, set Delivery to PENDING, and emit OutboxEvent", async () => {
+    const paymentRecord = {
+      id: "pay_ok",
+      orderId: "ord_ok",
+      providerReference: "CHV-PAY-OK-1",
+      amount: "3000.00" as any,
+      currency: "NGN",
+      status: "PENDING",
+      paidAt: null,
+      order: {
+        id: "ord_ok",
+        status: "PENDING_PAYMENT",
+        orderNumber: "CHV-ORD-5555",
+        customer: { userId: "usr_cust_3" },
+        restaurantId: "rest_1",
+        refund: null,
+      },
+    };
+
+    const findUniqueSpy = vi.spyOn(prisma.payment, "findUnique").mockResolvedValueOnce(paymentRecord as any);
+    const verifySpy = vi.spyOn(paystackService, "verifyTransaction").mockResolvedValueOnce({
+      status: "success",
+      amountMinor: 300000,
+      currency: "NGN",
+      paidAt: new Date(),
+      transactionId: "paystack_tx_12345",
+    });
+
+    const txOrderUpdateSpy = vi.fn().mockResolvedValue({});
+    const txDeliveryUpsertSpy = vi.fn().mockResolvedValue({});
+    const txOutboxCreateSpy = vi.fn().mockResolvedValue({});
+    const txOrderStatusHistorySpy = vi.fn().mockResolvedValue({});
+    const txNotificationCreateSpy = vi.fn().mockResolvedValue({});
+
+    const mockTx = {
+      payment: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      order: {
+        findUnique: vi.fn().mockResolvedValue(paymentRecord.order),
+        update: txOrderUpdateSpy,
+      },
+      orderStatusHistory: {
+        create: txOrderStatusHistorySpy,
+      },
+      delivery: {
+        upsert: txDeliveryUpsertSpy,
+      },
+      notification: {
+        create: txNotificationCreateSpy,
+      },
+      outboxEvent: {
+        create: txOutboxCreateSpy,
+      },
+    };
+
+    const txSpy = vi.spyOn(prisma, "$transaction").mockImplementationOnce(async (cb: any) => {
+      return cb(mockTx);
+    });
+
+    try {
+      const result = await paymentsService.verifyPayment("usr_cust_3", "CHV-PAY-OK-1");
+      expect(result.status).toBe("SUCCESS");
+
+      // Verify order transitioned to CONFIRMED
+      expect(txOrderUpdateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "ord_ok" },
+          data: { status: "CONFIRMED" },
+        })
+      );
+
+      // Verify delivery created with PENDING status (NOT READY!)
+      expect(txDeliveryUpsertSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            orderId: "ord_ok",
+            status: "PENDING",
+          }),
+        })
+      );
+
+      // Verify transactional OutboxEvent created for ORDER_CONFIRMED_NOTIFICATION
+      expect(txOutboxCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            eventType: "ORDER_CONFIRMED_NOTIFICATION",
+            aggregateType: "ORDER",
+            aggregateId: "ord_ok",
+            status: "PENDING",
+          }),
+        })
+      );
+    } finally {
+      findUniqueSpy.mockRestore();
+      verifySpy.mockRestore();
+      txSpy.mockRestore();
+    }
+  });
+
+  it("should validate refund prerequisites (unpaid order, existing refund, excessive amount)", async () => {
+    // 1. Order not found
+    const findOrderNullSpy = vi.spyOn(prisma.order, "findUnique").mockResolvedValueOnce(null);
+    await expect(
+      paymentsService.requestRefund("admin_1", "non_existent_order")
+    ).rejects.toThrow(NotFoundError);
+    findOrderNullSpy.mockRestore();
+
+    // 2. Order not successfully paid
+    const findOrderUnpaidSpy = vi.spyOn(prisma.order, "findUnique").mockResolvedValueOnce({
+      id: "ord_unpaid",
+      payment: { status: "PENDING" },
+      refund: null,
+    } as any);
+    await expect(
+      paymentsService.requestRefund("admin_1", "ord_unpaid")
+    ).rejects.toThrow(BadRequestError);
+    findOrderUnpaidSpy.mockRestore();
+
+    // 3. Order already refunded
+    const findOrderRefundedSpy = vi.spyOn(prisma.order, "findUnique").mockResolvedValueOnce({
+      id: "ord_already_refunded",
+      payment: { status: "SUCCESS", amount: "50.00" },
+      refund: { status: "REFUNDED" },
+    } as any);
+    await expect(
+      paymentsService.requestRefund("admin_1", "ord_already_refunded")
+    ).rejects.toThrow(/already been fully refunded/i);
+    findOrderRefundedSpy.mockRestore();
+
+    // 4. Refund amount exceeds payment amount
+    const findOrderExcessSpy = vi.spyOn(prisma.order, "findUnique").mockResolvedValueOnce({
+      id: "ord_excess",
+      payment: { status: "SUCCESS", amount: "50.00" }, // 5000 kobo
+      refund: null,
+    } as any);
+    await expect(
+      paymentsService.requestRefund("admin_1", "ord_excess", 6000) // 6000 > 5000
+    ).rejects.toThrow(/cannot exceed original payment amount/i);
+    findOrderExcessSpy.mockRestore();
+  });
+
+  it("should process refund request, call Paystack refund API, and create audit log", async () => {
+    const validOrder = {
+      id: "ord_to_refund",
+      payment: {
+        id: "pay_to_refund",
+        status: "SUCCESS",
+        amount: "100.00",
+        providerReference: "CHV-PAY-REFUNDABLE",
+        providerTransactionId: "paystack_tx_555",
+      },
+      refund: null,
+    };
+
+    const findOrderSpy = vi.spyOn(prisma.order, "findUnique").mockResolvedValueOnce(validOrder as any);
+
+    const mockCreatedRefund = {
+      id: "ref_created_1",
+      orderId: "ord_to_refund",
+      amount: "100.00",
+      currency: "NGN",
+      status: "REFUND_PENDING",
+      reason: "Customer cancellation",
+      requestedAt: new Date(),
+      completedAt: null,
+    };
+
+    const txRefundUpsertSpy = vi.fn().mockResolvedValue(mockCreatedRefund);
+    const txAuditLogCreateSpy = vi.fn().mockResolvedValue({});
+
+    const mockTx = {
+      refund: { upsert: txRefundUpsertSpy },
+      auditLog: { create: txAuditLogCreateSpy },
+    };
+
+    const txSpy = vi.spyOn(prisma, "$transaction").mockImplementationOnce(async (cb: any) => {
+      return cb(mockTx);
+    });
+
+    const createRefundSpy = vi.spyOn(paystackService, "createRefund").mockResolvedValueOnce({
+      status: "processed",
+      refundId: 887766,
+      amountMinor: 10000,
+      currency: "NGN",
+    });
+
+    const refundUpdateSpy = vi.spyOn(prisma.refund, "update").mockResolvedValueOnce({
+      ...mockCreatedRefund,
+      status: "REFUNDED",
+      completedAt: new Date(),
+    } as any);
+
+    try {
+      const result = await paymentsService.requestRefund(
+        "admin_user_1",
+        "ord_to_refund",
+        10000,
+        "Customer cancellation"
+      );
+
+      expect(result.status).toBe("REFUNDED");
+      expect(createRefundSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          transactionReferenceOrId: "CHV-PAY-REFUNDABLE",
+          amountMinor: 10000,
+        })
+      );
+      expect(refundUpdateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "ref_created_1" },
+          data: expect.objectContaining({ status: "REFUNDED" }),
+        })
+      );
+      expect(txAuditLogCreateSpy).toHaveBeenCalled();
+    } finally {
+      findOrderSpy.mockRestore();
+      txSpy.mockRestore();
+      createRefundSpy.mockRestore();
+      refundUpdateSpy.mockRestore();
+    }
+  });
+
+  it("should handle webhook events correctly (charge.success, refund.processed, refund.failed)", async () => {
+    // 1. Invalid signature
+    const verifySigSpy = vi.spyOn(paystackService, "verifyWebhookSignature").mockReturnValue(false);
+    await expect(
+      paymentsService.handleWebhook("{}", "invalid_sig")
+    ).rejects.toThrow(BadRequestError);
+    verifySigSpy.mockRestore();
+
+    // 2. charge.success webhook event
+    vi.spyOn(paystackService, "verifyWebhookSignature").mockReturnValue(true);
+
+    const findPaymentSpy = vi.spyOn(prisma.payment, "findUnique").mockResolvedValueOnce({
+      id: "pay_wh_1",
+      orderId: "ord_wh_1",
+      status: "PENDING",
+      amount: "50.00",
+      currency: "NGN",
+    } as any);
+
+    const mockTx = {
+      payment: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      order: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "ord_wh_1",
+          status: "PENDING_PAYMENT",
+          orderNumber: "ORD-WH-1",
+          customer: { userId: "usr_cust_wh" },
+          restaurantId: "rest_wh",
+          refund: null,
+        }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+      orderStatusHistory: { create: vi.fn().mockResolvedValue({}) },
+      delivery: { upsert: vi.fn().mockResolvedValue({}) },
+      notification: { create: vi.fn().mockResolvedValue({}) },
+      outboxEvent: { create: vi.fn().mockResolvedValue({}) },
+    };
+
+    const txSpy = vi.spyOn(prisma, "$transaction").mockImplementationOnce(async (cb: any) => {
+      return cb(mockTx);
+    });
+
+    const chargePayload = JSON.stringify({
+      event: "charge.success",
+      data: {
+        status: "success",
+        reference: "CHV-PAY-WH-REF",
+        amount: 5000,
+        currency: "NGN",
+        id: 778899,
+        paid_at: new Date().toISOString(),
+      },
+    });
+
+    const whResult = await paymentsService.handleWebhook(chargePayload, "valid_mock_sig");
+    expect(whResult.received).toBe(true);
+
+    findPaymentSpy.mockRestore();
+    txSpy.mockRestore();
+
+    // 3. refund.processed webhook event
+    const findRefundSpy = vi.spyOn(prisma.refund, "findFirst").mockResolvedValueOnce({
+      id: "ref_wh_1",
+      status: "REFUND_PENDING",
+    } as any);
+    const refundUpdateSpy = vi.spyOn(prisma.refund, "update").mockResolvedValueOnce({} as any);
+    const auditLogCreateSpy = vi.spyOn(prisma.auditLog, "create").mockResolvedValueOnce({} as any);
+
+    const refundProcessedPayload = JSON.stringify({
+      event: "refund.processed",
+      data: {
+        reference: "CHV-REF-WH-1",
+        status: "processed",
+        amount: 5000,
+      },
+    });
+
+    const refundWhResult = await paymentsService.handleWebhook(refundProcessedPayload, "valid_mock_sig");
+    expect(refundWhResult.received).toBe(true);
+    expect(refundUpdateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "ref_wh_1" },
+        data: expect.objectContaining({ status: "REFUNDED" }),
+      })
+    );
+
+    findRefundSpy.mockRestore();
+    refundUpdateSpy.mockRestore();
+    auditLogCreateSpy.mockRestore();
+    vi.restoreAllMocks();
   });
 });

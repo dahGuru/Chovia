@@ -6,8 +6,11 @@ import {
   initializePaymentRequestSchema,
   initializePaymentResponseSchema,
   verifyPaymentResponseSchema,
+  requestRefundRequestSchema,
+  refundResponseSchema,
 } from "./dto/payment.dto.js";
 import { BadRequestError } from "../../common/errors/api-error.js";
+import { authorize } from "../../plugins/auth-guard.js";
 
 export const paymentsRoutes: FastifyPluginAsync = async (fastify) => {
   // Public webhook handler from Paystack
@@ -77,6 +80,32 @@ export const paymentsRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const { reference } = request.params as { reference: string };
       const result = await paymentsService.verifyPayment(request.user.id, reference);
+      return reply.status(200).send(result);
+    }
+  );
+
+  fastify.post(
+    "/refund",
+    {
+      preHandler: [fastify.authenticate, authorize(["ADMIN"])],
+      schema: {
+        description: "Initiate and reconcile refund for an order (Admin only)",
+        tags: ["Payments"],
+        security: [{ bearerAuth: [] }],
+        body: requestRefundRequestSchema,
+        response: {
+          200: refundResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const body = requestRefundRequestSchema.parse(request.body);
+      const result = await paymentsService.requestRefund(
+        request.user.id,
+        body.orderId,
+        body.amountMinor,
+        body.reason
+      );
       return reply.status(200).send(result);
     }
   );

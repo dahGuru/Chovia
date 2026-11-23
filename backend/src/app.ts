@@ -4,7 +4,7 @@ import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import fastifyRawBody from "fastify-raw-body";
 import { validatorCompiler, serializerCompiler } from "@fastify/type-provider-zod";
-import { ZodError } from "zod";
+import { z, ZodError } from "zod";
 
 import "./types/auth.js";
 import { env } from "./config/env.js";
@@ -142,6 +142,13 @@ export async function buildApp() {
       schema: {
         description: "Application Liveness Probe (checks process uptime)",
         tags: ["Health"],
+        response: {
+          200: z.object({
+            status: z.string(),
+            uptime: z.number(),
+            timestamp: z.string(),
+          }),
+        },
       },
     },
     async (_request, reply) => {
@@ -159,6 +166,22 @@ export async function buildApp() {
       schema: {
         description: "Application Readiness Probe (verifies PostgreSQL and Redis)",
         tags: ["Health"],
+        response: {
+          200: z.object({
+            status: z.string(),
+            database: z.string(),
+            redis: z.string(),
+            environment: z.string(),
+            timestamp: z.string(),
+          }),
+          503: z.object({
+            status: z.string(),
+            database: z.string(),
+            redis: z.string(),
+            environment: z.string(),
+            timestamp: z.string(),
+          }),
+        },
       },
     },
     async (_request, reply) => {
@@ -182,6 +205,15 @@ export async function buildApp() {
       schema: {
         description: "API Health & Infrastructure Connectivity Status Check",
         tags: ["Health"],
+        response: {
+          200: z.object({
+            status: z.string(),
+            database: z.string(),
+            redis: z.string(),
+            environment: z.string(),
+            timestamp: z.string(),
+          }),
+        },
       },
     },
     async (_request, reply) => {

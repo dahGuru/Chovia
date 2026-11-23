@@ -202,7 +202,47 @@ export const environmentSchema = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["MOCK_INTEGRATIONS"],
-          message: "MOCK_INTEGRATIONS cannot be silently enabled in staging.",
+          message: "MOCK_INTEGRATIONS is strictly forbidden in staging.",
+        });
+      }
+
+      if (
+        data.DATABASE_URL.includes("localhost") ||
+        data.DATABASE_URL.includes("127.0.0.1") ||
+        data.DATABASE_URL === "postgresql://postgres:postgres@localhost:5432/chovia?schema=public"
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["DATABASE_URL"],
+          message: "Staging DATABASE_URL must not point to localhost.",
+        });
+      }
+
+      if (
+        data.REDIS_URL.includes("localhost") ||
+        data.REDIS_URL.includes("127.0.0.1") ||
+        data.REDIS_URL === "redis://localhost:6379"
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["REDIS_URL"],
+          message: "Staging REDIS_URL must not point to localhost.",
+        });
+      }
+
+      if (data.JWT_ACCESS_SECRET === DEFAULT_DEV_JWT_ACCESS || data.JWT_ACCESS_SECRET.includes("dev")) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["JWT_ACCESS_SECRET"],
+          message: "Insecure or default JWT_ACCESS_SECRET cannot be used in staging.",
+        });
+      }
+
+      if (data.JWT_REFRESH_SECRET === DEFAULT_DEV_JWT_REFRESH || data.JWT_REFRESH_SECRET.includes("dev")) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["JWT_REFRESH_SECRET"],
+          message: "Insecure or default JWT_REFRESH_SECRET cannot be used in staging.",
         });
       }
 
@@ -211,6 +251,54 @@ export const environmentSchema = z
           code: z.ZodIssueCode.custom,
           path: ["JWT_REFRESH_SECRET"],
           message: "JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be distinct keys in staging.",
+        });
+      }
+
+      if (!data.PAYSTACK_SECRET_KEY) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["PAYSTACK_SECRET_KEY"],
+          message: "PAYSTACK_SECRET_KEY is required in staging.",
+        });
+      }
+
+      if (!data.PAYSTACK_WEBHOOK_SECRET) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["PAYSTACK_WEBHOOK_SECRET"],
+          message: "PAYSTACK_WEBHOOK_SECRET is required in staging.",
+        });
+      }
+
+      if (!data.CLOUDINARY_CLOUD_NAME || !data.CLOUDINARY_API_KEY || !data.CLOUDINARY_API_SECRET) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["CLOUDINARY_CLOUD_NAME"],
+          message: "Cloudinary credentials (CLOUD_NAME, API_KEY, API_SECRET) are required in staging.",
+        });
+      }
+
+      if (!data.RESEND_API_KEY || !data.RESEND_API_KEY.startsWith("re_")) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["RESEND_API_KEY"],
+          message: "A valid RESEND_API_KEY starting with 're_' is required in staging.",
+        });
+      }
+
+      if (!data.GOOGLE_MAPS_API_KEY) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["GOOGLE_MAPS_API_KEY"],
+          message: "GOOGLE_MAPS_API_KEY is required in staging.",
+        });
+      }
+
+      if (!data.SENTRY_DSN || !data.SENTRY_DSN.startsWith("http")) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["SENTRY_DSN"],
+          message: "A valid SENTRY_DSN URL is mandatory in staging.",
         });
       }
     } else {

@@ -44,11 +44,21 @@ export class GoogleMapsService {
 
   constructor() {
     this.apiKey = env.GOOGLE_MAPS_API_KEY || "";
-    this.isMock =
-      env.MOCK_INTEGRATIONS ||
-      !this.apiKey ||
-      this.apiKey.startsWith("mock_") ||
-      this.apiKey.includes("Placeholder");
+    const isStrictEnv = env.NODE_ENV === "production" || env.NODE_ENV === "staging";
+    if (isStrictEnv) {
+      if (!this.apiKey || this.apiKey.startsWith("mock_") || this.apiKey.includes("Placeholder")) {
+        throw new Error(
+          `Google Maps API key is missing or invalid in ${env.NODE_ENV}. Mock mode is forbidden.`
+        );
+      }
+      this.isMock = false;
+    } else {
+      this.isMock =
+        env.MOCK_INTEGRATIONS ||
+        !this.apiKey ||
+        this.apiKey.startsWith("mock_") ||
+        this.apiKey.includes("Placeholder");
+    }
   }
 
   async geocode(address: string): Promise<GeocodeResult> {
@@ -177,23 +187,23 @@ export class GoogleMapsService {
           }
         } else {
           const errorText = await response.text().catch(() => "");
-          if (env.NODE_ENV === "production") {
+          if (env.NODE_ENV === "production" || env.NODE_ENV === "staging") {
             throw new Error(`Google Routes API error (${response.status}): ${errorText || "Request failed"}`);
           }
         }
       } catch (error) {
-        if (env.NODE_ENV === "production") {
+        if (env.NODE_ENV === "production" || env.NODE_ENV === "staging") {
           const message = error instanceof Error ? error.message : "Routing API failure";
-          throw new Error(`Production route calculation failed: ${message}. Silent fallback is forbidden.`, {
+          throw new Error(`Route calculation failed in ${env.NODE_ENV}: ${message}. Silent fallback is forbidden.`, {
             cause: error,
           });
         }
       }
-    } else if (env.NODE_ENV === "production") {
-      throw new Error("GOOGLE_MAPS_USE_ROUTES_API must be enabled in production.");
+    } else if (env.NODE_ENV === "production" || env.NODE_ENV === "staging") {
+      throw new Error(`GOOGLE_MAPS_USE_ROUTES_API must be enabled in ${env.NODE_ENV}.`);
     }
 
-    // Controlled fallback to Haversine approximation permitted only in non-production
+    // Controlled fallback to Haversine approximation permitted only in development or test mode
     const distanceKm = calculateHaversineDistanceKm(
       origin.latitude,
       origin.longitude,

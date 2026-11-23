@@ -80,3 +80,27 @@ export const uploadImageRequestSchema = z
   .strict();
 
 export type UploadImageRequestDto = z.infer<typeof uploadImageRequestSchema>;
+
+export const verifyUploadRequestSchema = z
+  .object({
+    folder: z.enum(["avatars", "restaurants", "menu", "documents"]),
+    publicId: z.string().min(1, "publicId is required"),
+    format: z.string().optional(),
+    bytes: z.number().int().positive().optional(),
+    resourceType: z.string().optional(),
+    restaurantId: z.string().uuid().optional(),
+  })
+  .strict();
+
+export type VerifyUploadRequestDto = z.infer<typeof verifyUploadRequestSchema>;
+
+export const verifyUploadResponseSchema = z
+  .object({
+    verified: z.boolean(),
+    folder: z.string(),
+    publicId: z.string(),
+  })
+  .strict();
+
+export type VerifyUploadResponseDto = z.infer<typeof verifyUploadResponseSchema>;
+

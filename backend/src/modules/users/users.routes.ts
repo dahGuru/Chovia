@@ -10,6 +10,8 @@ import {
   uploadSignatureRequestSchema,
   uploadSignatureResponseSchema,
   uploadImageRequestSchema,
+  verifyUploadRequestSchema,
+  verifyUploadResponseSchema,
   userResponseSchema,
   deviceResponseSchema,
 } from "./dto/user.dto.js";
@@ -198,6 +200,37 @@ export const usersRoutes: FastifyPluginAsync = async (fastify) => {
 
       const result = await cloudinaryService.uploadImage(body.file, body.folder, body.customPublicId);
       return reply.status(200).send(result);
+    }
+  );
+
+  fastify.post(
+    "/verify-upload",
+    {
+      schema: {
+        description: "Verify completed client direct upload to Cloudinary",
+        tags: ["Users", "Uploads"],
+        security: [{ bearerAuth: [] }],
+        body: verifyUploadRequestSchema,
+        response: {
+          200: verifyUploadResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const body = verifyUploadRequestSchema.parse(request.body);
+      await verifyUploadAuthorization(request.user, body.folder, body.restaurantId);
+      cloudinaryService.verifyUploadResponse(body.folder, {
+        publicId: body.publicId,
+        format: body.format,
+        bytes: body.bytes,
+        resourceType: body.resourceType,
+      });
+
+      return reply.status(200).send({
+        verified: true,
+        folder: body.folder,
+        publicId: body.publicId,
+      });
     }
   );
 };

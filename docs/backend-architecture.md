@@ -1,16 +1,16 @@
 # CHOVIA — Backend Architecture Documentation
 
 > **Document:** Backend Architecture and Implementation Specification  
-> **Status:** Production-Ready MVP Implementation  
+> **Status:** Implemented MVP (Automated test suite passing; staging environment verification required for live external integrations)  
 > **Repository Root:** `backend/`  
 > **Package Name:** `@chovia/backend`  
-> **Technology Stack:** Node.js, Fastify 5, TypeScript 5.9, Prisma 7, PostgreSQL 18 (PostGIS), Redis, BullMQ, Zod 4  
+> **Technology Stack:** Node.js 24, Fastify 5, TypeScript 5.9, Prisma 7, PostgreSQL 18 (PostGIS), Redis 7, BullMQ, Zod 4  
 
 ---
 
 ## 1. Architectural Overview
 
-CHOVIA follows a **Modular Monolith** architecture within a Turborepo monorepo. The backend runtime is powered by **Fastify 5**, a high-performance, low-overhead Node.js web framework. The backend exposes a RESTful JSON API documented through OpenAPI 3.0 (Swagger) and is designed with strict domain boundaries, authoritative server-side logic, and strong type safety.
+CHOVIA follows a **Modular Monolith** architecture within a Turborepo monorepo. The backend runtime is powered by **Fastify 5**, a high-performance, low-overhead Node.js web framework. The backend exposes a RESTful JSON API documented through OpenAPI 3.1 (Swagger) and is designed with strict domain boundaries, authoritative server-side logic, and strong type safety.
 
 ### Core Architectural Decisions
 
@@ -19,12 +19,15 @@ CHOVIA follows a **Modular Monolith** architecture within a Turborepo monorepo. 
 | Architecture Pattern | Modular Monolith | Keeps domain modules cohesive within a single deployable unit while avoiding premature microservice complexity |
 | Server Framework | Fastify 5.2 | High throughput, schema-driven serialization, native plugin architecture, and low memory footprint |
 | Language & Runtime | TypeScript 5.9 + Node.js 24 | Strong static typing, modern ECMAScript module resolution (`NodeNext`), and strict typechecking |
-| Transport & Serialization | REST + JSON + OpenAPI 3.0 | Standardized HTTP methods, explicit request/response DTOs, and automatic interactive Swagger documentation |
+| Transport & Serialization | REST + JSON + OpenAPI 3.1 | Standardized HTTP methods, explicit request/response DTOs, and automatic interactive Swagger documentation |
 | Data Boundary | Zod 4 DTO Layer | Strict validation of untrusted client input; response masking preventing leakage of database internals |
 | Authoritative Store | PostgreSQL 18 + Neon + PostGIS | Authoritative source of persistent business records, geospatial indexing, and ACID transactions |
 | ORM | Prisma ORM 7 (`@prisma/adapter-pg`) | Type-safe persistence queries with pooled database connections and raw SQL spatial extensions |
-| Ephemeral Store | Redis 7 + ioredis | Distributed cache, rate limiting, and BullMQ queue infrastructure with offline fail-soft fallback |
-| Background Processing | BullMQ | Asynchronous job processing (emails, webhooks, notifications) with retry backoff and idempotency |
+| Ephemeral Store | Redis 7 + ioredis | Distributed cache, rate limiting, and BullMQ queue infrastructure with explicit URL parsing and staging guards |
+| Background Processing | BullMQ + Transactional Outbox | Asynchronous job processing (emails, notifications, delivery dispatch) backed by durable PostgreSQL `OutboxEvent` |
+| Media Management | Cloudinary | Client-side signed uploads with provider signatures and backend magic byte verification |
+| Mobile Notifications | Expo Push Service | Authenticated push dispatch with automatic dead token deactivation |
+| Observability | Sentry | Distributed tracing and deep PII/credential scrubbing on breadcrumbs, exceptions, and request envelopes |
 
 ---
 
@@ -50,10 +53,19 @@ backend/
 │   ├── generated/
 │   │   └── prisma/             # Generated Prisma 7 client and model types
 │   ├── integrations/
-│   │   ├── email/              # Email delivery service abstraction (mock / transactional)
-│   │   ├── google-maps/        # Google Maps Geocoding & Distance Matrix with Haversine fallback
-│   │   ├── paystack/           # Paystack payment initialization, verification, and HMAC webhook
-│   │   └── storage/            # Cloudflare R2 / AWS S3 pre-signed upload URL generator
+│   │   ├── cloudinary/         # Cloudinary media signatures, magic byte sniffing, size limits
+│   │   ├── email/              # Email delivery service abstraction with Resend backend
+│   │   ├── expo/               # Expo Push Notification service and dead-token cleanup
+│   │   ├── google-maps/        # Google Maps Routes API & Haversine geographic calculator
+│   │   ├── paystack/           # Paystack transactions, verification, webhooks, refunds
+│   │   ├── resend/             # Resend transactional email API client
+│   │   └── sentry/             # Sentry observability with deep PII & secret scrubbing
+│   ├── jobs/
+│   │   ├── constants/          # BullMQ queue and job name constants
+│   │   ├── outbox/             # Transactional OutboxDispatcher for resilient event delivery
+│   │   ├── processors/         # BullMQ processors (email, notification, delivery assignment)
+│   │   ├── queues/             # BullMQ queue instantiations with SHA-256 opaque job IDs
+│   │   └── types/              # Strong job payload TypeScript interfaces
 │   ├── modules/
 │   │   ├── admin/              # Platform statistics, restaurant/rider verification, audit logs
 │   │   ├── addresses/          # Customer delivery addresses with PostGIS Point coordinates
@@ -65,21 +77,23 @@ backend/
 │   │   ├── menu/               # Categories, menu items, availability toggling, restaurant menu
 │   │   ├── notifications/      # User notification listing and mark-as-read
 │   │   ├── orders/             # Order checkout, idempotency, status transitions, cancellation
-│   │   ├── payments/           # Paystack initialization, payment verification, webhook ingestion
+│   │   ├── payments/           # Paystack initialization, payment verification, webhook ingestion, refunds
 │   │   ├── pricing/            # Authoritative delivery fee and platform commission calculations
 │   │   ├── restaurants/        # Public listing, distance filtering, onboarding, availability
 │   │   ├── restaurant-staff/   # Staff invitations, invite acceptance, role permissions
-│   │   └── users/              # User profile management and device registration
+│   │   └── users/              # User profile management, device registration, upload verification
 │   ├── plugins/
 │   │   ├── auth-guard.ts       # Role-based access control (RBAC) and staff authorization guards
 │   │   ├── jwt.ts              # Fastify JWT plugin registration wrapped with fastify-plugin
-│   │   └── swagger.ts          # OpenAPI 3.0 / Swagger documentation plugin registration
-│   ├── queues/
-│   │   └── queue.ts            # Lazy BullMQ queue initializers with test/mock bypass
+│   │   └── swagger.ts          # OpenAPI 3.1 / Swagger documentation plugin registration
 │   ├── tests/
 │   │   ├── app.test.ts         # Fastify HTTP integration and health check test suite
 │   │   ├── crypto.test.ts      # Password hashing and token generation test suite
-│   │   └── money-geo.test.ts   # Monetary integer math and Haversine distance test suite
+│   │   ├── integrations-security.test.ts # Cloudinary, Sentry PII, Redis URL, Env tests
+│   │   ├── money-geo.test.ts   # Monetary integer math and Haversine distance test suite
+│   │   ├── openapi.test.ts     # OpenAPI 3.1 contract and schema verification suite
+│   │   ├── payments.test.ts    # Paystack verification, refunds, state machine & webhook suite
+│   │   └── queues-workflows.test.ts # BullMQ queues, opaque job IDs, outbox & delivery processor
 │   ├── types/
 │   │   └── auth.ts             # JWT payload interface and Fastify module augmentation
 │   └── utils/
@@ -167,4 +181,20 @@ The caching abstraction in [src/cache/redis.ts](file:///C:/Users/HP/Videos/WEB D
 - If a live Redis server is reachable at `REDIS_URL`, `ioredis` is utilized for key-value caching, TTL eviction, and distributed lock management.
 - If Redis is unreachable or offline during local development and testing, an in-memory `Map` with automatic expiration gracefully replaces Redis operations. This ensures that unit tests, integration tests, and local development environments remain fully functional without requiring a running Docker or Redis daemon.
 
-Similarly, BullMQ queues in [src/queues/queue.ts](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/backend/src/queues/queue.ts) are lazily initialized. During testing or when `MOCK_INTEGRATIONS=true`, job dispatching is routed to mock loggers rather than hanging on unestablished Redis socket connections.
+Similarly, BullMQ queues in [src/jobs/queues/index.ts](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/backend/src/jobs/queues/index.ts) are lazily initialized. During testing or when `MOCK_INTEGRATIONS=true`, job dispatching is routed to mock loggers rather than hanging on unestablished Redis socket connections.
+
+---
+
+## 6. Transactional Outbox Pattern & Order-Delivery Lifecycle
+
+### 6.1 Transactional Outbox (`OutboxEvent`)
+To ensure strict at-least-once processing without losing asynchronous side-effects (push notifications, automated dispatch jobs) if Redis or external services are temporarily restarting, the backend uses the Transactional Outbox Pattern:
+1. When state changes occur inside database transactions (e.g. `PaymentsService.processPaymentSuccess` or `OrdersService.markOrderReady`), an `OutboxEvent` record is written inside the same `prisma.$transaction`.
+2. The `OutboxDispatcher` periodically or reactively queries pending events, acquires an atomic lock via `prisma.outboxEvent.updateMany({ where: { id, status: 'PENDING' }, data: { status: 'PROCESSING', attempts: { increment: 1 } } })`, and forwards the payload to BullMQ queues (`enqueuePushNotification`, `enqueueDeliveryTimeoutCheck`).
+3. Upon successful queueing, the event transitions to `DISPATCHED`. On transient failure, exponential backoff is scheduled until maximum retry attempts (5) are exhausted, transitioning the record to `FAILED` for operational inspection.
+
+### 6.2 Order-Ready vs. Delivery Lifecycle
+- **Payment Success:** When payment succeeds, `Payment.status` becomes `SUCCESS` and `Order.status` becomes `CONFIRMED`. The associated `Delivery` is upserted with `status: 'PENDING'` (NOT `READY`), preventing premature rider dispatch while the kitchen has not started cooking.
+- **Kitchen Preparation:** The restaurant transitions the order to `PREPARING`.
+- **Order Ready (`markOrderReady`):** Once the meal is fully packaged, the restaurant marks the order `READY`. This atomically updates `Order.status` to `READY`, updates `Delivery.status` from `PENDING` to `READY`, inserts an `OutboxEvent` for `DISPATCH_DELIVERY`, and triggers rider proximity dispatch.
+- **Rider Proximity Dispatch:** The delivery worker matches active riders with `isOnline: true`, `isAvailable: true`, location freshness (< 30 minutes), and Haversine distance within 10 km of the restaurant. If no rider is immediately available, bounded retries (up to 3 attempts with exponential backoff) run before emitting an `AuditLog` escalation alert for manual dispatch.

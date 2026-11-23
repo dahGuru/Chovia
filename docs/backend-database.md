@@ -1,7 +1,7 @@
 # CHOVIA — Backend Database & Persistence
 
 > **Document:** PostgreSQL, PostGIS, Prisma 7 Architecture, Schema, and Spatial Handling  
-> **Status:** Production-Ready MVP Implementation  
+> **Status:** Implemented MVP (Automated tests pass; unapplied migration generated for staging/production review)  
 > **Schema File:** [database/prisma/schema.prisma](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/database/prisma/schema.prisma)  
 > **Database Client:** [backend/src/database/prisma.ts](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/backend/src/database/prisma.ts)  
 
@@ -120,3 +120,22 @@ PostgreSQL is the single authoritative source of truth for CHOVIA's business ope
   - `deliveryFeeMinor = calculateDeliveryFee(distanceKm)`
   - `platformFeeMinor = calculatePlatformFee(subtotalMinor)`
 - Formatted currency strings (`₦1,500.00`) are provided alongside integer minor units in response DTOs for consistent client rendering.
+
+---
+
+## 5. Schema Extensions & Migration Management (Stage 3.2.2)
+
+### 5.1 Outbox & Reliability Schema
+In [database/prisma/schema.prisma](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/database/prisma/schema.prisma):
+- **`OutboxEvent` Model:** Implements transactional outbox durability (`id`, `eventType`, `aggregateType`, `aggregateId`, `payload`, `status`, `attempts`, `scheduledAt`, `processedAt`, `lastError`).
+- **`OutboxEventStatus` Enum:** `PENDING`, `PROCESSING`, `DISPATCHED`, `FAILED`.
+- **`Payment.providerTransactionId`:** Tracks external provider numeric or string transaction identifiers with `@unique` constraint.
+- **`DeliveryStatus` Lifecycle:** Added `PENDING` to `DeliveryStatus` enum; set `@default(PENDING)` on `Delivery.status`.
+- **`Delivery` Retries:** Added `dispatchAttempts Int @default(0)` and `lastDispatchAttemptAt DateTime?` for bounded retry tracking.
+- **`RiderProfile` Real-Time Availability:** Added `isOnline Boolean @default(false)`, `isAvailable Boolean @default(true)`, `lastLatitude Decimal? @db.Decimal(10, 7)`, `lastLongitude Decimal? @db.Decimal(10, 7)`, and `lastLocationUpdatedAt DateTime?` with compound index `@@index([status, isOnline, isAvailable])`.
+
+### 5.2 Migration File Policy
+In accordance with strict safety constraints (`AGENTS.md` - *"Never run destructive migrations, resets, or data deletion without explicit approval"*):
+- Schema changes have been validated via `pnpm db:validate` and the Prisma client generated via `pnpm db:generate`.
+- A pure SQL migration script has been generated at [database/prisma/migrations/20261123140000_stage_3_2_2_remediation/migration.sql](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/database/prisma/migrations/20261123140000_stage_3_2_2_remediation/migration.sql).
+- The migration is **unapplied to remote/production databases** and ready for controlled execution via `pnpm db:deploy` or platform CI/CD pipelines during scheduled maintenance.

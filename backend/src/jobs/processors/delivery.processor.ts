@@ -2,6 +2,12 @@ import type { Job } from "bullmq";
 import { prisma } from "../../database/prisma.js";
 import { JOB_NAMES } from "../constants/jobs.constants.js";
 import type { CheckDeliveryTimeoutJobData } from "../types/jobs.types.js";
+import { calculateHaversineDistanceKm } from "../../utils/geo.js";
+import { enqueueDeliveryTimeoutCheck } from "../queues/index.js";
+
+const MAX_DISPATCH_ATTEMPTS = 3;
+const DISPATCH_RADIUS_KM = 10.0;
+const LOCATION_FRESHNESS_MINUTES = 30;
 
 export async function processDeliveryJob(job: Job): Promise<void> {
   if (job.name === JOB_NAMES.CHECK_DELIVERY_TIMEOUT) {
@@ -19,22 +25,52 @@ export async function processDeliveryJob(job: Job): Promise<void> {
       },
     });
 
-    // Idempotency: if already assigned, picked up, or completed, skip further actions
+    // 1. Invariant: Delivery must exist, be in READY state, and unassigned
     if (!delivery || delivery.status !== "READY" || delivery.riderId !== null) {
       return;
     }
 
-    // Identify eligible active riders who are not currently on an active delivery
-    const eligibleRiders = await prisma.riderProfile.findMany({
+    // 2. Crucial Invariant: The associated order MUST be in READY state!
+    // Never dispatch or assign riders to an order that is still PENDING, CONFIRMED, or PREPARING.
+    if (delivery.order.status !== "READY") {
+      return;
+    }
+
+    // 3. Look up active, online, available riders without active assignments
+    const activeRiders = await prisma.riderProfile.findMany({
       where: {
         status: "ACTIVE",
+        isOnline: true,
+        isAvailable: true,
         deliveries: {
           none: {
             status: { in: ["ASSIGNED", "OUT_FOR_DELIVERY"] },
           },
         },
       },
-      take: 5,
+    });
+
+    // 4. Filter by geographic proximity to restaurant & location freshness
+    const restLat = Number(delivery.order.restaurant.latitude);
+    const restLng = Number(delivery.order.restaurant.longitude);
+    const freshnessCutoff = new Date(Date.now() - LOCATION_FRESHNESS_MINUTES * 60 * 1000);
+
+    const eligibleRiders = activeRiders.filter((rider) => {
+      // If rider has coordinates, verify location freshness and distance
+      if (rider.lastLatitude !== null && rider.lastLongitude !== null) {
+        if (rider.lastLocationUpdatedAt && rider.lastLocationUpdatedAt < freshnessCutoff) {
+          return false;
+        }
+        const distKm = calculateHaversineDistanceKm(
+          restLat,
+          restLng,
+          Number(rider.lastLatitude),
+          Number(rider.lastLongitude)
+        );
+        return distKm <= DISPATCH_RADIUS_KM;
+      }
+      // If rider has not updated location yet (e.g. test environment or initial setup), permit assignment if active & online
+      return true;
     });
 
     const selectedRider = eligibleRiders[0];
@@ -114,38 +150,65 @@ export async function processDeliveryJob(job: Job): Promise<void> {
         });
       });
     } else {
-      // No active riders currently available: log audit alert and notify customer of delay
-      await prisma.auditLog.create({
+      // 5. No eligible riders found: track dispatch attempt and schedule durable retry with exponential backoff
+      const currentAttempts = delivery.dispatchAttempts + 1;
+
+      await prisma.delivery.update({
+        where: { id: delivery.id },
         data: {
-          action: "UPDATE",
-          entityType: "Delivery",
-          entityId: delivery.id,
-          metadata: {
-            alert: "DELIVERY_UNASSIGNED_TIMEOUT",
-            orderId: data.orderId,
-            reason: "No active riders currently available for auto-dispatch",
-          },
+          dispatchAttempts: currentAttempts,
+          lastDispatchAttemptAt: new Date(),
         },
       });
 
-      // Avoid spamming customer notifications by checking if delay notification was already sent
-      const existingNotification = await prisma.notification.findFirst({
-        where: {
-          userId: delivery.order.customer.userId,
-          title: "Finding a Rider",
-        },
-      });
+      if (currentAttempts < MAX_DISPATCH_ATTEMPTS) {
+        // Schedule next retry with exponential backoff (e.g. 1m, 2m, 4m)
+        const delayMs = Math.min(300000, Math.pow(2, currentAttempts - 1) * 60000);
+        try {
+          await enqueueDeliveryTimeoutCheck(
+            { orderId: data.orderId, deliveryId: data.deliveryId },
+            delayMs
+          );
+        } catch {
+          // If queue is down, outbox or worker loop will retry
+        }
 
-      if (!existingNotification) {
-        await prisma.notification.create({
+        // Notify customer on initial search delay only to avoid notification spam
+        if (currentAttempts === 1) {
+          const existingNotification = await prisma.notification.findFirst({
+            where: {
+              userId: delivery.order.customer.userId,
+              title: "Finding a Rider",
+            },
+          });
+
+          if (!existingNotification) {
+            await prisma.notification.create({
+              data: {
+                userId: delivery.order.customer.userId,
+                type: "SYSTEM",
+                title: "Finding a Rider",
+                message: `We are actively searching for an available rider for order #${delivery.order.orderNumber}. Thank you for your patience.`,
+                data: {
+                  orderId: delivery.orderId,
+                  deliveryId: delivery.id,
+                },
+              },
+            });
+          }
+        }
+      } else {
+        // Max attempts reached: escalate to manual operations / alert restaurant and admin
+        await prisma.auditLog.create({
           data: {
-            userId: delivery.order.customer.userId,
-            type: "SYSTEM",
-            title: "Finding a Rider",
-            message: `We are actively searching for an available rider for order #${delivery.order.orderNumber}. Thank you for your patience.`,
-            data: {
-              orderId: delivery.orderId,
-              deliveryId: delivery.id,
+            action: "UPDATE",
+            entityType: "Delivery",
+            entityId: delivery.id,
+            metadata: {
+              alert: "DISPATCH_RETRY_EXHAUSTED",
+              orderId: data.orderId,
+              attempts: currentAttempts,
+              reason: "Maximum automated dispatch attempts reached without finding an available rider. Requires manual assignment.",
             },
           },
         });

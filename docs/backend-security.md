@@ -1,7 +1,7 @@
 # CHOVIA — Backend Security Architecture
 
 > **Document:** Authentication, Authorization, Token Lifecycle, and Security Controls  
-> **Status:** Production-Ready MVP Implementation  
+> **Status:** Implemented MVP (Automated tests pass; requires staging verification)  
 > **Plugins Reference:** [backend/src/plugins/jwt.ts](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/backend/src/plugins/jwt.ts), [backend/src/plugins/auth-guard.ts](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/backend/src/plugins/auth-guard.ts)  
 > **Security Utils:** [backend/src/utils/password.ts](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/backend/src/utils/password.ts), [backend/src/utils/crypto.ts](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/backend/src/utils/crypto.ts)  
 
@@ -100,3 +100,41 @@ Third-party payment webhooks from Paystack are secured via HMAC-SHA512:
 - **Data Transfer Objects (DTOs):** All external endpoints filter database model output through explicit Zod response contracts. Password hashes, reset tokens, and OTP codes are strictly excluded.
 - **Parameterized SQL:** All PostGIS raw SQL queries use tagged template literals (`prisma.$queryRaw`), eliminating SQL injection vulnerabilities.
 - **Audit Logging:** Administrative operations (restaurant approval, rider suspension, config modifications) record structured audit entries with actor ID, entity ID, previous state, new state, IP address, and user agent.
+
+---
+
+## 6. Background Queue Security & Opaque Job IDs
+
+Location: [backend/src/jobs/queues/index.ts](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/backend/src/jobs/queues/index.ts)
+
+To prevent sensitive Personally Identifiable Information (PII) or secrets from persisting in plaintext within Redis key spaces or monitoring dashboards:
+- BullMQ `jobId` parameters are generated using `createOpaqueJobId(prefix, ...inputs)`.
+- The inputs (email addresses, OTP codes, invitation tokens) are hashed using SHA-256 and truncated to 24 hexadecimal characters.
+- Job IDs strictly follow the pattern `<prefix>_<sha256_digest>` (e.g. `email_verify_a1b2c3d4e5f6...`), ensuring zero leakage of plain emails or secrets in Redis keys.
+
+---
+
+## 7. Media Upload Security & Magic Byte Inspection
+
+Location: [backend/src/integrations/cloudinary/cloudinary.service.ts](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/backend/src/integrations/cloudinary/cloudinary.service.ts)
+
+To mitigate malicious file uploads, executable masquerading, and unconstrained resource consumption:
+1. **Direct Signed Uploads:** The backend signs upload parameters using HMAC-SHA1 with folder restrictions, allowed formats, and byte size caps. Clients upload directly to Cloudinary using these credentials.
+2. **Magic Byte Verification (`inspectFileMagicBytes`):** Before storing or attaching media assets, file buffers are inspected for authoritative magic numbers:
+   - JPEG: `FF D8 FF`
+   - PNG: `89 50 4E 47 0D 0A 1A 0A`
+   - WEBP: `52 49 46 46 ... 57 45 42 50`
+   - PDF: `25 50 44 46`
+   Disallowed file formats (executables, shell scripts, html) are rejected with `400 Bad Request`.
+3. **Category Size Caps:** Strictly enforced upload policies: avatars (5MB), menu (5MB), restaurants (5MB), documents (10MB).
+
+---
+
+## 8. Observability & Telemetry PII Scrubbing
+
+Location: [backend/src/integrations/sentry/sentry.service.ts](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/backend/src/integrations/sentry/sentry.service.ts)
+
+To maintain compliance with privacy regulations (GDPR, NDPR) and prevent security breaches through telemetry logs:
+- **String Sanitization (`sanitizeString`):** Masks Bearer tokens, JWT strings (`[REDACTED_JWT]`), connection credentials (`[REDACTED]`), Paystack keys (`sk_live_[REDACTED]`), and Resend keys (`re_[REDACTED]`).
+- **Object Scrubbing (`scrubData`):** Recursively inspects data dictionaries and replaces sensitive keys (passwords, tokens, cookies, CVVs, card numbers, account numbers, BVNs) with `[REDACTED]`.
+- **Sentry Integration Hooks:** All exception events and breadcrumbs pass through `beforeSend` and `beforeBreadcrumb` filters before outbound network transmission to Sentry.

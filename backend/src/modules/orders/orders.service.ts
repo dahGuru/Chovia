@@ -397,7 +397,10 @@ export class OrdersService {
   }
 
   async markOrderReady(userId: string, orderId: string): Promise<OrderResponseDto> {
-    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { delivery: true },
+    });
     if (!order) throw new NotFoundError("Order not found");
 
     if (order.status !== "PREPARING") {
@@ -414,18 +417,49 @@ export class OrdersService {
         },
       });
 
-      // Update Delivery record status if exists
+      // Update Delivery record status from PENDING to READY
       await tx.delivery.updateMany({
         where: { orderId },
         data: { status: "READY" },
       });
 
-      return tx.order.update({
+      const updatedOrder = await tx.order.update({
         where: { id: orderId },
         data: { status: "READY" },
-        include: { items: true, restaurant: true, payment: true, statusHistory: true },
+        include: {
+          items: true,
+          restaurant: true,
+          payment: true,
+          statusHistory: true,
+          delivery: true,
+        },
       });
+
+      // Schedule delivery dispatch via Transactional Outbox
+      if (updatedOrder.delivery) {
+        await tx.outboxEvent.create({
+          data: {
+            eventType: "DISPATCH_DELIVERY",
+            aggregateType: "DELIVERY",
+            aggregateId: updatedOrder.delivery.id,
+            payload: {
+              deliveryId: updatedOrder.delivery.id,
+              orderId,
+            },
+            status: "PENDING",
+          },
+        });
+      }
+
+      return updatedOrder;
     });
+
+    try {
+      const { outboxDispatcher } = await import("../../jobs/outbox/outbox.dispatcher.js");
+      await outboxDispatcher.dispatchPendingEvents();
+    } catch {
+      // Safe: outbox record is already durably committed to PostgreSQL
+    }
 
     return serializeOrder(updated);
   }

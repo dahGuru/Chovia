@@ -3,47 +3,87 @@ import { env } from "../config/env.js";
 
 /**
  * Parses a Redis connection URL into strongly-typed RedisOptions,
- * preserving TLS (rediss://), username, password, port, and db index.
+ * strictly validating scheme (redis:// or rediss://), host, port, database index,
+ * credentials, and TLS configuration.
  */
 export function parseRedisUrl(redisUrl: string): RedisOptions {
+  if (!redisUrl || typeof redisUrl !== "string") {
+    throw new Error("Redis URL is required and must be a string");
+  }
+
+  let url: URL;
   try {
-    const url = new URL(redisUrl);
-    const isTls = url.protocol === "rediss:";
-    const dbIndex =
-      url.pathname && url.pathname.length > 1
-        ? Number.parseInt(url.pathname.slice(1), 10)
-        : undefined;
+    url = new URL(redisUrl);
+  } catch (err) {
+    throw new Error(`Malformed Redis URL: ${(err as Error).message}`, { cause: err });
+  }
 
-    const options: RedisOptions = {
-      host: url.hostname || "127.0.0.1",
-      port: Number.parseInt(url.port || (isTls ? "6380" : "6379"), 10),
-      maxRetriesPerRequest: null,
-      lazyConnect: true,
-    };
+  if (url.protocol !== "redis:" && url.protocol !== "rediss:") {
+    throw new Error(
+      `Unsupported Redis protocol: "${url.protocol}". Only "redis:" and "rediss:" are supported.`
+    );
+  }
 
-    if (url.username) {
-      options.username = decodeURIComponent(url.username);
-    }
-    if (url.password) {
-      options.password = decodeURIComponent(url.password);
-    }
-    if (dbIndex !== undefined && !Number.isNaN(dbIndex)) {
-      options.db = dbIndex;
-    }
-    if (isTls) {
-      options.tls = {};
-    }
+  const isTls = url.protocol === "rediss:";
 
-    return options;
-  } catch {
-    // Fallback if URL parsing fails
-    return {
-      host: "127.0.0.1",
-      port: 6379,
-      maxRetriesPerRequest: null,
-      lazyConnect: true,
+  if (!url.hostname || url.hostname.trim().length === 0) {
+    throw new Error("Redis URL missing valid hostname");
+  }
+
+  let port = isTls ? 6380 : 6379;
+  if (url.port) {
+    port = Number.parseInt(url.port, 10);
+    if (Number.isNaN(port) || port < 1 || port > 65535) {
+      throw new Error(`Invalid Redis port: "${url.port}". Must be an integer between 1 and 65535.`);
+    }
+  }
+
+  let dbIndex: number | undefined;
+  if (url.pathname && url.pathname.length > 1) {
+    const rawDb = url.pathname.slice(1);
+    if (!/^\d+$/.test(rawDb)) {
+      throw new Error(`Invalid Redis database path: "${url.pathname}". Must be a numeric database index.`);
+    }
+    dbIndex = Number.parseInt(rawDb, 10);
+    if (dbIndex < 0 || dbIndex > 15) {
+      throw new Error(`Redis database index ${dbIndex} out of valid range (0-15).`);
+    }
+  }
+
+  let username: string | undefined;
+  let password: string | undefined;
+  try {
+    if (url.username) username = decodeURIComponent(url.username);
+    if (url.password) password = decodeURIComponent(url.password);
+  } catch (err) {
+    throw new Error(`Malformed credentials percent encoding in Redis URL: ${(err as Error).message}`, {
+      cause: err,
+    });
+  }
+
+  const options: RedisOptions = {
+    host: url.hostname,
+    port,
+    maxRetriesPerRequest: null,
+    lazyConnect: true,
+  };
+
+  if (username) {
+    options.username = username;
+  }
+  if (password) {
+    options.password = password;
+  }
+  if (dbIndex !== undefined) {
+    options.db = dbIndex;
+  }
+  if (isTls) {
+    options.tls = {
+      rejectUnauthorized: env.NODE_ENV === "production" || env.NODE_ENV === "staging",
     };
   }
+
+  return options;
 }
 
 // In-memory fallback strictly for local development or test mode

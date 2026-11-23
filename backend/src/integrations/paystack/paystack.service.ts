@@ -77,8 +77,8 @@ export interface VerifyPaymentResult {
 
 export interface CreateRefundParams {
   transactionReferenceOrId: string;
-  amountMinor?: number;
-  merchantNote?: string;
+  amountMinor?: number | undefined;
+  merchantNote?: string | undefined;
 }
 
 export interface CreateRefundResult {
@@ -87,7 +87,7 @@ export interface CreateRefundResult {
   reference: string;
   amountMinor: number;
   currency: string;
-  refundedAt?: Date;
+  refundedAt?: Date | undefined;
   rawResponse?: unknown;
 }
 

@@ -1,7 +1,7 @@
 # CHOVIA — Backend Environment & Configuration
 
 > **Document:** Environment Variables Specification, Configuration Validation, and Secret Management  
-> **Status:** Production-Ready MVP Implementation  
+> **Status:** Implemented MVP (Validated against Zod schema with strict staging/production verification rules)  
 > **File Reference:** [backend/src/config/env.ts](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/backend/src/config/env.ts)  
 > **Template File:** [backend/.env.example](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/backend/.env.example)  
 
@@ -11,45 +11,55 @@
 
 CHOVIA enforces runtime configuration validation using **Zod 4**. When the Fastify backend initializes, [src/config/env.ts](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/backend/src/config/env.ts) parses and validates all environment variables against an explicit schema before any route or database connection is established. If any mandatory configuration is missing or malformed, the application immediately aborts startup with a descriptive error message.
 
-### Safe Development Defaults
-To ensure developers can run the backend immediately without complex external dependencies:
-- Sensitive secrets have safe development defaults when `NODE_ENV !== "production"`.
-- `MOCK_INTEGRATIONS=true` enables self-contained, offline fallbacks for Paystack, Google Maps, Cloudflare R2/S3, and Email services.
-- Database URL defaults to a local PostgreSQL instance (`postgresql://postgres:postgres@localhost:5432/chovia`).
-- Redis defaults to `redis://localhost:6379` with automatic fallback to an internal in-memory cache if the Redis daemon is offline.
+### Environment Modes: Development, Staging, and Production
+
+| Rule | Development (`development`) | Staging (`staging`) | Production (`production`) |
+|---|---|---|---|
+| `MOCK_INTEGRATIONS` | Allowed (`true` or `false`) | **Strictly Forbidden (`false`)** | **Strictly Forbidden (`false`)** |
+| `DATABASE_URL` | Localhost permitted | **Must NOT point to localhost** | **Must NOT point to localhost** |
+| `REDIS_URL` | Localhost permitted | **Must NOT point to localhost** | **Must NOT point to localhost** |
+| `PAYSTACK_SECRET_KEY` | `sk_test_*` allowed | `sk_test_*` or `sk_live_*` allowed | **Must be live (`sk_live_*`)** |
+| `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | Dev defaults allowed (32+ chars) | Required, must be distinct (32+ chars) | Required, must be distinct (32+ chars) |
+| `OTP_HMAC_SECRET` | Dev default allowed (32+ chars) | Required (32+ chars) | Required (32+ chars) |
+| Cloudinary (`CLOUDINARY_*`) | Optional in mock mode | **Required** | **Required** |
+| Resend (`RESEND_API_KEY`) | Optional in mock mode | **Required** | **Required** |
+| Google Maps (`GOOGLE_MAPS_API_KEY`) | Optional in mock mode | **Required** | **Required** |
+| Sentry (`SENTRY_DSN`) | Optional in dev | **Required** | **Required** |
 
 ---
 
 ## 2. Environment Variables Catalogue
 
-| Variable | Type | Default | Required in Production | Description |
+| Variable | Type | Default | Required in Staging / Prod | Description |
 |---|---|---|---|---|
-| `NODE_ENV` | Enum | `"development"` | Yes | Application environment: `"development"`, `"production"`, or `"test"` |
+| `NODE_ENV` | Enum | `"development"` | Yes | Environment mode: `"development"`, `"staging"`, `"production"`, or `"test"` |
 | `PORT` | Integer | `4000` | No | HTTP port for Fastify server |
 | `HOST` | String | `"0.0.0.0"` | No | Host interface to bind HTTP listener |
-| `DATABASE_URL` | String | `"postgresql://postgres:postgres@localhost:5432/chovia"` | **Yes** | Authoritative PostgreSQL connection string (pooled connection) |
+| `FRONTEND_URL` | String | `"http://localhost:3000"` | Yes | Authoritative frontend client origin |
+| `DATABASE_URL` | String | (Local dev URL) | **Yes** | Authoritative PostgreSQL connection string (pooled Neon + PostGIS) |
 | `DIRECT_URL` | String | `undefined` | No | Direct database connection string for Prisma CLI schema migrations |
-| `REDIS_URL` | String | `"redis://localhost:6379"` | **Yes** | Redis connection URI for caching and BullMQ queue infrastructure |
-| `JWT_ACCESS_SECRET` | String | (Dev secret) | **Yes** | Cryptographic secret for signing HMAC-SHA256 JWT access tokens |
-| `JWT_REFRESH_SECRET` | String | (Dev secret) | **Yes** | Cryptographic secret for signing and verifying refresh tokens |
+| `REDIS_URL` | String | `"redis://localhost:6379"` | **Yes** | Redis connection URI (`redis://` or `rediss://`; port 1-65535; db 0-15) |
+| `JWT_ACCESS_SECRET` | String | (Dev secret) | **Yes** | Cryptographic secret for signing HMAC-SHA256 JWT access tokens (min 32 chars) |
+| `JWT_REFRESH_SECRET` | String | (Dev secret) | **Yes** | Cryptographic secret for refresh tokens (min 32 chars, distinct from access) |
 | `JWT_ACCESS_EXPIRES_IN` | String | `"15m"` | No | JWT access token lifespan (e.g. `"15m"`, `"1h"`) |
-| `JWT_REFRESH_EXPIRES_IN` | String | `"30d"` | No | Refresh token lifespan (e.g. `"30d"`, `"7d"`) |
-| `PAYSTACK_SECRET_KEY` | String | `""` | **Yes** | Paystack secret key (`sk_live_...` or `sk_test_...`) |
+| `JWT_REFRESH_EXPIRES_IN_DAYS` | Integer | `30` | No | Refresh token lifespan in days |
+| `OTP_HMAC_SECRET` | String | (Dev secret) | **Yes** | HMAC-SHA256 key for OTP generation and verification (min 32 chars) |
+| `OTP_EXPIRES_IN_MINUTES` | Integer | `15` | No | Lifespan of OTP codes in minutes |
+| `PAYSTACK_SECRET_KEY` | String | `""` | **Yes** | Paystack secret key (`sk_live_*` in production; `sk_test_*` in staging/dev) |
 | `PAYSTACK_PUBLIC_KEY` | String | `""` | **Yes** | Paystack public key for frontend payment checkout |
 | `PAYSTACK_WEBHOOK_SECRET` | String | `""` | **Yes** | Secret used to verify HMAC-SHA512 webhook signatures from Paystack |
-| `GOOGLE_MAPS_API_KEY` | String | `""` | **Yes** | Google Maps API key for Geocoding and Distance Matrix calculations |
-| `STORAGE_ENDPOINT` | String | `""` | No | S3 / Cloudflare R2 compatible S3 API endpoint URL |
-| `STORAGE_ACCESS_KEY` | String | `""` | No | Cloudflare R2 / AWS S3 access key ID |
-| `STORAGE_SECRET_KEY` | String | `""` | No | Cloudflare R2 / AWS S3 secret access key |
-| `STORAGE_BUCKET` | String | `"chovia-assets"` | No | Target S3 bucket name for uploads |
-| `STORAGE_PUBLIC_URL` | String | `"https://storage.chovia.app"` | No | Public CDN URL for serving uploaded assets |
+| `CLOUDINARY_CLOUD_NAME` | String | `""` | **Yes** | Cloudinary cloud identifier for signed media uploads |
+| `CLOUDINARY_API_KEY` | String | `""` | **Yes** | Cloudinary API Key |
+| `CLOUDINARY_API_SECRET` | String | `""` | **Yes** | Cloudinary API Secret for upload signature computation |
+| `RESEND_API_KEY` | String | `""` | **Yes** | Resend API key for transactional email delivery |
 | `EMAIL_FROM` | String | `"CHOVIA <no-reply@chovia.app>"` | No | Default sender address for transactional emails |
-| `SMTP_HOST` | String | `""` | No | SMTP server hostname for transactional email delivery |
-| `SMTP_PORT` | Integer | `587` | No | SMTP port (e.g. 587 for TLS, 465 for SSL) |
-| `SMTP_USER` | String | `""` | No | SMTP authentication username |
-| `SMTP_PASS` | String | `""` | No | SMTP authentication password |
-| `MOCK_INTEGRATIONS` | Boolean | `true` (in dev) | No | When `true`, third-party services operate in offline mock mode |
-| `CORS_ORIGIN` | String | `"*"` | No | Allowed CORS origin string or comma-separated list |
+| `GOOGLE_MAPS_API_KEY` | String | `""` | **Yes** | Google Maps Platform API key (Routes API & Geocoding) |
+| `GOOGLE_MAPS_USE_ROUTES_API` | Boolean | `true` | No | When `true`, queries Routes API for motorcycle routes; Haversine fallback |
+| `SENTRY_DSN` | String | `""` | **Yes** | Sentry DSN endpoint for error reporting and APM telemetry |
+| `SENTRY_ENVIRONMENT` | String | `"development"` | No | Sentry deployment environment tag |
+| `EXPO_ACCESS_TOKEN` | String | `""` | No | Expo push API access token for authenticated push notification requests |
+| `MOCK_INTEGRATIONS` | Boolean | `false` | Forbidden | Operates integrations in offline mock mode (strictly forbidden in staging/prod) |
+| `CORS_ORIGIN` | String | (Local dev origins) | Yes | Allowed CORS origin string or comma-separated list |
 
 ---
 
@@ -58,9 +68,9 @@ To ensure developers can run the backend immediately without complex external de
 1. **Never Commit Secrets:**  
    `.env` and `.env.*` files are explicitly excluded in the root `.gitignore`. Never commit actual API keys, database credentials, or JWT signing secrets to version control.
 2. **Never Print Secrets in Logs:**  
-   The application logs configuration status during startup without dumping environment variable values. Error handlers strip sensitive fields from response bodies.
-3. **Production Configuration:**  
-   In production environments (e.g. Neon, AWS, Cloudflare, Fly.io, Railway), environment variables must be injected securely via platform secret managers or container environment injection.
+   The application logs configuration status during startup without dumping environment variable values. Error handlers and Sentry instrumentation scrub sensitive credentials and tokens deeply.
+3. **Staging and Production Verification:**  
+   In staging and production environments, all secrets must be injected securely via platform secret managers or container orchestration secrets. Staging validates real third-party integrations with test keys before production deployment.
 4. **Local Development Setup:**  
    To set up a local development environment, copy the template file:
    ```bash

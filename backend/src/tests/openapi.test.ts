@@ -25,6 +25,7 @@ interface OpenApiSpec {
         bearerFormat?: string;
       };
     };
+    schemas?: Record<string, unknown>;
   };
   paths: Record<
     string,
@@ -115,6 +116,8 @@ describe("OpenAPI 3.1 Contract & Automated Verification", () => {
       "/api/v1/payments/webhook",
       "/api/v1/addresses/",
       "/api/v1/pricing/estimate",
+      "/api/v1/payments/refund",
+      "/api/v1/users/verify-upload",
     ];
 
     for (const endpoint of requiredEndpoints) {
@@ -132,6 +135,8 @@ describe("OpenAPI 3.1 Contract & Automated Verification", () => {
       { path: "/api/v1/cart/items", method: "post" },
       { path: "/api/v1/pricing/estimate", method: "post" },
       { path: "/api/v1/users/upload-signature", method: "post" },
+      { path: "/api/v1/payments/refund", method: "post" },
+      { path: "/api/v1/users/verify-upload", method: "post" },
     ];
 
     for (const { path: routePath, method } of bodyEndpoints) {
@@ -151,5 +156,14 @@ describe("OpenAPI 3.1 Contract & Automated Verification", () => {
         }
       }
     }
+  });
+
+  it("should define reusable schemas in components.schemas", () => {
+    const schemas = spec.components?.schemas as Record<string, unknown> | undefined;
+    expect(schemas).toBeDefined();
+    expect(schemas?.ErrorResponse).toBeDefined();
+    expect(schemas?.ValidationError).toBeDefined();
+    expect(schemas?.PaginationMeta).toBeDefined();
+    expect(schemas?.HealthStatusResponse).toBeDefined();
   });
 });

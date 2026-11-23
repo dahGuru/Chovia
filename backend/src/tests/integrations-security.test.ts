@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { CloudinaryService } from "../integrations/cloudinary/cloudinary.service.js";
+import { CloudinaryService, inspectFileMagicBytes } from "../integrations/cloudinary/cloudinary.service.js";
 import { GoogleMapsService } from "../integrations/google-maps/google-maps.service.js";
-import { scrubData } from "../integrations/sentry/sentry.service.js";
+import { scrubData, sanitizeString } from "../integrations/sentry/sentry.service.js";
 import { parseRedisUrl } from "../cache/redis.js";
 import { environmentSchema } from "../config/env.js";
 import { BadRequestError } from "../common/errors/api-error.js";
@@ -98,6 +98,46 @@ describe("Environment Schema Security & Strict Validation", () => {
       expect(issues.some((msg) => msg.includes("must be distinct"))).toBe(true);
     }
   });
+
+  it("should accept valid staging environment configuration", () => {
+    const stagingConfig = {
+      ...baseProdConfig,
+      NODE_ENV: "staging",
+      FRONTEND_URL: "https://staging.chovia.app",
+      PAYSTACK_SECRET_KEY: FAKE_TEST_KEY,
+    };
+    const result = environmentSchema.safeParse(stagingConfig);
+    expect(result.success).toBe(true);
+  });
+
+  it("should reject staging environment when MOCK_INTEGRATIONS is enabled", () => {
+    const result = environmentSchema.safeParse({
+      ...baseProdConfig,
+      NODE_ENV: "staging",
+      MOCK_INTEGRATIONS: true,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issues = result.error.issues.map((i) => i.message);
+      expect(issues.some((msg) => msg.includes("strictly forbidden in staging"))).toBe(true);
+    }
+  });
+
+  it("should reject staging environment with localhost DATABASE_URL or REDIS_URL", () => {
+    const dbResult = environmentSchema.safeParse({
+      ...baseProdConfig,
+      NODE_ENV: "staging",
+      DATABASE_URL: "postgresql://localhost:5432/chovia",
+    });
+    expect(dbResult.success).toBe(false);
+
+    const redisResult = environmentSchema.safeParse({
+      ...baseProdConfig,
+      NODE_ENV: "staging",
+      REDIS_URL: "redis://127.0.0.1:6379",
+    });
+    expect(redisResult.success).toBe(false);
+  });
 });
 
 describe("Sentry PII Scrubbing & Data Sanitization", () => {
@@ -141,6 +181,20 @@ describe("Sentry PII Scrubbing & Data Sanitization", () => {
     expect(original.user.passwordHash).toBe("$2b$12$abcdefg");
     expect(original.headers.authorization).toBe("Bearer secret_access_token_value");
   });
+
+  it("should sanitize strings by scrubbing embedded secrets, tokens, and URLs", () => {
+    const rawString = "User authorization failed: Bearer secret_bearer_token_123456";
+    expect(sanitizeString(rawString)).toBe("User authorization failed: Bearer [REDACTED]");
+
+    const rawJwt = "Token expired: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.do_not_leak_signature";
+    expect(sanitizeString(rawJwt)).toBe("Token expired: [REDACTED_JWT]");
+
+    const rawUrl = "Database connection failed at postgresql://chovia_admin:supersecretpassword@neon.tech:5432/db";
+    expect(sanitizeString(rawUrl)).toBe("Database connection failed at postgresql://chovia_admin:[REDACTED]@neon.tech:5432/db");
+
+    const rawKey = "Paystack rejected key: sk_live_1234567890abcdef1234567890";
+    expect(sanitizeString(rawKey)).toBe("Paystack rejected key: sk_live_[REDACTED]");
+  });
 });
 
 describe("Redis URL Parser (TLS, Credentials, DB Index)", () => {
@@ -162,10 +216,47 @@ describe("Redis URL Parser (TLS, Credentials, DB Index)", () => {
     expect(opts.db).toBe(0);
     expect(opts.tls).toBeDefined();
   });
+
+  it("should reject non-redis protocols and invalid configurations with explicit errors", () => {
+    expect(() => parseRedisUrl("http://localhost:6379")).toThrow(/Unsupported Redis protocol/i);
+    expect(() => parseRedisUrl("postgres://localhost:5432/db")).toThrow(/Unsupported Redis protocol/i);
+    expect(() => parseRedisUrl("redis://")).toThrow(/missing valid hostname/i);
+    expect(() => parseRedisUrl("redis://localhost:99999")).toThrow(/Malformed Redis URL|Invalid Redis port/i);
+    expect(() => parseRedisUrl("redis://localhost:-5")).toThrow(/Malformed Redis URL|Invalid Redis port/i);
+    expect(() => parseRedisUrl("redis://localhost:6379/99")).toThrow(/database index 99 out of valid range/i);
+    expect(() => parseRedisUrl("redis://localhost:6379/notanumber")).toThrow(/Must be a numeric database index/i);
+  });
 });
 
 describe("Cloudinary Integration & Validation Security", () => {
   const cloudinary = new CloudinaryService();
+
+  it("should verify file magic bytes for valid JPEG, PNG, WEBP, and PDF", () => {
+    // Valid JPEG magic bytes (FF D8 FF E0)
+    const jpegBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
+    expect(inspectFileMagicBytes(jpegBuffer)).toEqual({ format: "jpg", mimeType: "image/jpeg" });
+
+    // Valid PNG magic bytes (89 50 4E 47 0D 0A 1A 0A)
+    const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    expect(inspectFileMagicBytes(pngBuffer)).toEqual({ format: "png", mimeType: "image/png" });
+
+    // Valid WEBP magic bytes (RIFF .... WEBP)
+    const webpBuffer = Buffer.from([
+      0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+    ]);
+    expect(inspectFileMagicBytes(webpBuffer)).toEqual({ format: "webp", mimeType: "image/webp" });
+
+    // Valid PDF magic bytes (%PDF)
+    const pdfBuffer = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]);
+    expect(inspectFileMagicBytes(pdfBuffer)).toEqual({ format: "pdf", mimeType: "application/pdf" });
+
+    // Corrupt or unrecognized executable (MZ)
+    const exeBuffer = Buffer.from([0x4d, 0x5a, 0x90, 0x00]);
+    expect(inspectFileMagicBytes(exeBuffer)).toBeNull();
+
+    // Short buffer (< 4 bytes)
+    expect(inspectFileMagicBytes(Buffer.from([0x01, 0x02]))).toBeNull();
+  });
 
   it("should generate signed upload parameters for allowed folder", () => {
     const params = cloudinary.generateUploadSignature("menu", "item_photo_123");
