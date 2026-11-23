@@ -1,0 +1,8 @@
+node_modules
+.pnpm-store
+.next
+.expo
+dist
+coverage
+backend/src/generated/prisma
+pnpm-lock.yaml

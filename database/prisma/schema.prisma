@@ -1,0 +1,1048 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../../backend/src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum UserRole {
+  CUSTOMER
+  RESTAURANT_STAFF
+  RIDER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum RestaurantStatus {
+  PENDING_APPROVAL
+  ACTIVE
+  REJECTED
+  SUSPENDED
+}
+
+enum RestaurantAvailability {
+  OPEN
+  CLOSED
+  SUSPENDED
+}
+
+enum StaffMembershipStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum StaffInvitationRole {
+  RESTAURANT_STAFF
+}
+
+enum RiderStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum MenuItemAvailability {
+  AVAILABLE
+  UNAVAILABLE
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  PENDING
+  CONFIRMED
+  PREPARING
+  READY
+  ASSIGNED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  REJECTED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  ABANDONED
+}
+
+enum PaymentProvider {
+  PAYSTACK
+}
+
+enum RefundStatus {
+  REFUND_PENDING
+  REFUNDED
+  FAILED
+}
+
+enum DeliveryStatus {
+  PENDING
+  READY
+  ASSIGNED
+  OUT_FOR_DELIVERY
+  DELIVERED
+}
+
+enum OutboxEventStatus {
+  PENDING
+  PROCESSING
+  DISPATCHED
+  FAILED
+}
+
+enum DeliveryAssignmentEventType {
+  ASSIGNED
+  RELEASED
+}
+
+enum DeliveryReleaseReason {
+  CUSTOMER_UNAVAILABLE
+  VEHICLE_ISSUE
+  PERSONAL_EMERGENCY
+  TOO_FAR
+  OTHER
+}
+
+enum CommissionType {
+  RESTAURANT
+  DELIVERY
+}
+
+enum NotificationType {
+  NEW_ORDER
+  ORDER_CONFIRMED
+  ORDER_PREPARING
+  ORDER_READY
+  ORDER_OUT_FOR_DELIVERY
+  ORDER_DELIVERED
+  ORDER_REJECTED
+  ORDER_CANCELLED
+  REFUND_UPDATED
+  NEW_DELIVERY_AVAILABLE
+  DELIVERY_ASSIGNED
+  DELIVERY_RELEASED
+  SYSTEM
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  APPROVE
+  REJECT
+  SUSPEND
+  UNSUSPEND
+  CANCEL
+  REFUND
+  ASSIGN
+  RELEASE
+  PICKUP
+  DELIVER
+  LOGIN
+  LOGOUT
+  OTHER
+}
+
+enum CommissionConfigStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum DeliveryPricingConfigStatus {
+  ACTIVE
+  INACTIVE
+}
+
+
+// ============================================================
+// USER / IDENTITY
+// ============================================================
+
+model User {
+  id              String     @id @default(uuid()) @db.Uuid
+  name            String
+  email           String     @unique
+  emailVerified   Boolean    @default(false)
+  image           String?
+  phone           String     @unique
+  passwordHash    String
+  role            UserRole
+  status          UserStatus @default(ACTIVE)
+
+  emailVerifiedAt DateTime?
+  phoneVerifiedAt DateTime?
+
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  customerProfile CustomerProfile?
+  riderProfile    RiderProfile?
+
+  restaurantMemberships    RestaurantStaffMembership[]
+  staffInvitationsCreated  StaffInvitation[]           @relation("StaffInvitationsCreated")
+
+  notifications Notification[]
+  devices       UserDevice[]
+  auditLogs     AuditLog[]
+  refreshTokens RefreshToken[]
+
+  @@index([role])
+  @@index([status])
+  @@index([createdAt])
+  @@map("users")
+}
+
+// ============================================================
+// REFRESH TOKENS / SESSIONS
+// ============================================================
+
+model RefreshToken {
+  id                String      @id @default(uuid()) @db.Uuid
+
+  userId            String      @db.Uuid
+  deviceId          String?     @db.Uuid
+
+  tokenHash         String      @unique
+  familyId          String      @default(uuid()) @db.Uuid
+
+  expiresAt         DateTime
+  revokedAt         DateTime?
+
+  replacedByTokenId String?     @unique @db.Uuid
+
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device            UserDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  replacedBy        RefreshToken? @relation("RefreshTokenReplacement", fields: [replacedByTokenId], references: [id], onDelete: SetNull)
+  replaces          RefreshToken? @relation("RefreshTokenReplacement")
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+
+// ============================================================
+// CUSTOMER
+// ============================================================
+
+model CustomerProfile {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @unique @db.Uuid
+
+  firstName String
+  lastName  String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id])
+  addresses Address[]
+  orders    Order[]
+  cart      Cart?
+  favorites Favorite[]
+
+  @@map("customer_profiles")
+}
+
+
+// ============================================================
+// RIDER
+// ============================================================
+
+model RiderProfile {
+  id        String      @id @default(uuid()) @db.Uuid
+  userId    String      @unique @db.Uuid
+
+  firstName String
+  lastName  String
+
+  status    RiderStatus @default(PENDING)
+
+  isOnline              Boolean   @default(false)
+  isAvailable           Boolean   @default(true)
+  lastLatitude          Decimal?  @db.Decimal(10, 7)
+  lastLongitude         Decimal?  @db.Decimal(10, 7)
+  lastLocationUpdatedAt DateTime?
+
+  vehicleType String?
+  vehiclePlateNumber String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  deliveries Delivery[]
+  assignmentEvents DeliveryAssignmentEvent[]
+
+  @@index([status])
+  @@index([status, isOnline, isAvailable])
+  @@map("rider_profiles")
+}
+
+
+// ============================================================
+// RESTAURANT
+// ============================================================
+
+model Restaurant {
+  id          String   @id @default(uuid()) @db.Uuid
+
+  name        String
+  description String?
+
+  phone       String
+  email       String?
+
+  address     String
+
+  latitude    Decimal  @db.Decimal(10, 7)
+  longitude   Decimal  @db.Decimal(10, 7)
+
+  // PostGIS geometry column.
+  // Prisma does not currently model this as a native Prisma type.
+  location    Unsupported("geometry(Point,4326)")
+
+  maxDeliveryDistanceKm Decimal @db.Decimal(8, 2)
+
+  status       RestaurantStatus       @default(PENDING_APPROVAL)
+  availability RestaurantAvailability @default(CLOSED)
+
+  manualClosure Boolean @default(false)
+
+  approvedAt DateTime?
+  approvedBy String? @db.Uuid
+
+  suspendedAt DateTime?
+  suspendedBy String? @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  staffMemberships RestaurantStaffMembership[]
+  staffInvitations StaffInvitation[]
+
+  operatingHours OperatingHours[]
+
+  cuisines RestaurantCuisine[]
+
+  menuCategories MenuCategory[]
+
+  orders Order[]
+
+  @@index([status])
+  @@index([availability])
+  @@index([createdAt])
+  @@map("restaurants")
+}
+
+
+// ============================================================
+// RESTAURANT STAFF MEMBERSHIP
+// ============================================================
+
+model RestaurantStaffMembership {
+  id String @id @default(uuid()) @db.Uuid
+
+  userId       String @db.Uuid
+  restaurantId String @db.Uuid
+
+  status StaffMembershipStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user       User       @relation(fields: [userId], references: [id])
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+
+  @@unique([userId, restaurantId])
+  @@index([restaurantId, status])
+  @@index([userId, status])
+  @@map("restaurant_staff_memberships")
+}
+
+
+// ============================================================
+// RESTAURANT STAFF INVITATIONS
+// ============================================================
+
+model StaffInvitation {
+  id              String     @id @default(uuid()) @db.Uuid
+
+  email           String
+  restaurantId    String     @db.Uuid
+  invitedByUserId String     @db.Uuid
+
+  role            StaffInvitationRole @default(RESTAURANT_STAFF)
+
+  tokenHash       String     @unique
+
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  revokedAt       DateTime?
+
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  restaurant      Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  invitedBy       User       @relation("StaffInvitationsCreated", fields: [invitedByUserId], references: [id])
+
+  @@index([restaurantId])
+  @@index([email])
+  @@index([invitedByUserId])
+  @@index([expiresAt])
+  @@map("staff_invitations")
+}
+
+
+// ============================================================
+// RESTAURANT OPERATING HOURS
+// ============================================================
+
+model OperatingHours {
+  id String @id @default(uuid()) @db.Uuid
+
+  restaurantId String   @db.Uuid
+  dayOfWeek   DayOfWeek
+
+  isClosed Boolean @default(false)
+
+  openTime  String?
+  closeTime String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+
+  @@unique([restaurantId, dayOfWeek])
+  @@map("operating_hours")
+}
+
+
+// ============================================================
+// CUISINES
+// ============================================================
+
+model CuisineCategory {
+  id       String  @id @default(uuid()) @db.Uuid
+  name     String  @unique
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurants RestaurantCuisine[]
+
+  @@map("cuisine_categories")
+}
+
+model RestaurantCuisine {
+  id String @id @default(uuid()) @db.Uuid
+
+  restaurantId    String @db.Uuid
+  cuisineCategoryId String @db.Uuid
+
+  restaurant      Restaurant      @relation(fields: [restaurantId], references: [id])
+  cuisineCategory CuisineCategory @relation(fields: [cuisineCategoryId], references: [id])
+
+  @@unique([restaurantId, cuisineCategoryId])
+  @@index([cuisineCategoryId])
+  @@map("restaurant_cuisines")
+}
+
+
+// ============================================================
+// MENU
+// ============================================================
+
+model MenuCategory {
+  id String @id @default(uuid()) @db.Uuid
+
+  restaurantId String @db.Uuid
+
+  name        String
+  description String?
+
+  sortOrder Int @default(0)
+
+  isArchived Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+
+  items MenuItem[]
+
+  @@index([restaurantId, isArchived])
+  @@index([restaurantId, sortOrder])
+  @@map("menu_categories")
+}
+
+model MenuItem {
+  id String @id @default(uuid()) @db.Uuid
+
+  categoryId String @db.Uuid
+
+  name        String
+  description String?
+
+  price Decimal @db.Decimal(12, 2)
+
+  maxQuantity Int @default(10)
+
+  availability MenuItemAvailability @default(AVAILABLE)
+
+  imageKey       String?
+  imageUrl       String?
+
+  isArchived Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  category MenuCategory @relation(fields: [categoryId], references: [id])
+
+  cartItems CartItem[]
+  orderItems OrderItem[]
+  favorites Favorite[]
+
+  @@index([categoryId, availability, isArchived])
+  @@index([name])
+  @@map("menu_items")
+}
+
+
+// ============================================================
+// CUSTOMER ADDRESSES
+// ============================================================
+
+model Address {
+  id String @id @default(uuid()) @db.Uuid
+
+  customerId String @db.Uuid
+
+  label String
+  addressText String
+
+  latitude  Decimal @db.Decimal(10, 7)
+  longitude Decimal @db.Decimal(10, 7)
+
+  location Unsupported("geometry(Point,4326)")
+
+  isDefault Boolean @default(false)
+  // A partial unique index in PostgreSQL enforces at most one default per customer.
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  customer CustomerProfile @relation(fields: [customerId], references: [id])
+
+  orders Order[]
+
+  @@index([customerId])
+  @@map("addresses")
+}
+
+
+// ============================================================
+// CART
+// ============================================================
+
+model Cart {
+  id String @id @default(uuid()) @db.Uuid
+
+  customerId String @unique @db.Uuid
+
+  restaurantId String? @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items CartItem[]
+  customer CustomerProfile @relation(fields: [customerId], references: [id])
+
+  @@index([restaurantId])
+  @@map("carts")
+}
+
+model CartItem {
+  id String @id @default(uuid()) @db.Uuid
+
+  cartId     String @db.Uuid
+  menuItemId String @db.Uuid
+
+  quantity Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cart     Cart     @relation(fields: [cartId], references: [id])
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id])
+
+  @@unique([cartId, menuItemId])
+  @@index([menuItemId])
+  @@map("cart_items")
+}
+
+
+// ============================================================
+// ORDERS
+// ============================================================
+
+model Order {
+  id String @id @default(uuid()) @db.Uuid
+
+  orderNumber String @unique
+  checkoutRequestKey String? @unique
+
+  customerId String @db.Uuid
+  restaurantId String @db.Uuid
+  addressId String? @db.Uuid
+
+  status OrderStatus @default(PENDING_PAYMENT)
+
+  subtotal       Decimal @db.Decimal(12, 2)
+  deliveryFee    Decimal @db.Decimal(12, 2)
+  totalAmount    Decimal @db.Decimal(12, 2)
+
+  restaurantCommission Decimal @db.Decimal(12, 2)
+  deliveryCommission   Decimal @default(0) @db.Decimal(12, 2)
+
+  deliveryDistanceKm Decimal? @db.Decimal(8, 2)
+
+  // Delivery address snapshot.
+  deliveryAddressText String
+
+  deliveryLatitude  Decimal @db.Decimal(10, 7)
+  deliveryLongitude Decimal @db.Decimal(10, 7)
+
+  rejectionReason String?
+  rejectionNote   String?
+
+  cancelledReason String?
+  cancelledNote   String?
+
+  cancelledAt DateTime?
+  rejectedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  customer   CustomerProfile @relation(fields: [customerId], references: [id])
+  restaurant Restaurant      @relation(fields: [restaurantId], references: [id])
+  address    Address?       @relation(fields: [addressId], references: [id])
+
+  items OrderItem[]
+
+  payment Payment?
+  refund  Refund?
+  delivery Delivery?
+
+  statusHistory OrderStatusHistory[]
+
+  @@index([customerId, createdAt])
+  @@index([restaurantId, status, createdAt])
+  @@index([status, createdAt])
+  @@index([orderNumber])
+  @@map("orders")
+}
+
+model Favorite {
+  id         String   @id @default(uuid()) @db.Uuid
+  customerId String   @db.Uuid
+  menuItemId String   @db.Uuid
+  createdAt  DateTime @default(now())
+
+  customer CustomerProfile @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  menuItem MenuItem        @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, menuItemId])
+  @@index([customerId, createdAt])
+  @@map("favorites")
+}
+
+model OrderItem {
+  id String @id @default(uuid()) @db.Uuid
+
+  orderId    String @db.Uuid
+  menuItemId String? @db.Uuid
+
+  // Historical snapshot.
+  itemName String
+
+  unitPrice Decimal @db.Decimal(12, 2)
+  quantity  Int
+  lineTotal Decimal @db.Decimal(12, 2)
+
+  createdAt DateTime @default(now())
+
+  order    Order     @relation(fields: [orderId], references: [id])
+  menuItem MenuItem? @relation(fields: [menuItemId], references: [id])
+
+  @@index([orderId])
+  @@index([menuItemId])
+  @@map("order_items")
+}
+
+
+// ============================================================
+// PAYMENTS
+// ============================================================
+
+model Payment {
+  id String @id @default(uuid()) @db.Uuid
+
+  orderId String @unique @db.Uuid
+
+  provider PaymentProvider @default(PAYSTACK)
+
+  providerReference     String  @unique
+  providerTransactionId String? @unique
+
+  amount   Decimal @db.Decimal(12, 2)
+  currency String  @default("NGN")
+
+  status PaymentStatus @default(PENDING)
+
+  paidAt DateTime?
+
+  providerResponse Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([status])
+  @@index([providerReference])
+  @@map("payments")
+}
+
+
+// ============================================================
+// REFUNDS
+// ============================================================
+
+model Refund {
+  id String @id @default(uuid()) @db.Uuid
+
+  orderId String @unique @db.Uuid
+
+  amount Decimal @db.Decimal(12, 2)
+  currency String @default("NGN")
+
+  status RefundStatus @default(REFUND_PENDING)
+
+  providerReference String?
+
+  reason String?
+
+  requestedAt DateTime @default(now())
+  completedAt DateTime?
+
+  providerResponse Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([status])
+  @@index([providerReference])
+  @@map("refunds")
+}
+
+
+// ============================================================
+// DELIVERY
+// ============================================================
+
+model Delivery {
+  id String @id @default(uuid()) @db.Uuid
+
+  orderId String @unique @db.Uuid
+
+  riderId String? @db.Uuid
+
+  status DeliveryStatus @default(PENDING)
+
+  dispatchAttempts      Int       @default(0)
+  lastDispatchAttemptAt DateTime?
+
+  deliveryFee Decimal @db.Decimal(12, 2)
+
+  choviaCommission Decimal @db.Decimal(12, 2)
+
+  riderEarnings Decimal @db.Decimal(12, 2)
+
+  deliveryDistanceKm Decimal? @db.Decimal(8, 2)
+
+  assignedAt DateTime?
+  pickedUpAt DateTime?
+  deliveredAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id])
+  rider RiderProfile? @relation(fields: [riderId], references: [id])
+
+  assignmentEvents DeliveryAssignmentEvent[]
+
+  @@index([status])
+  @@index([riderId, status])
+  @@map("deliveries")
+}
+
+
+// ============================================================
+// DELIVERY ASSIGNMENT HISTORY
+// ============================================================
+
+model DeliveryAssignmentEvent {
+  id String @id @default(uuid()) @db.Uuid
+
+  deliveryId String @db.Uuid
+  riderId    String @db.Uuid
+
+  type DeliveryAssignmentEventType
+
+  releaseReason DeliveryReleaseReason?
+  releaseNote   String?
+
+  createdAt DateTime @default(now())
+
+  delivery Delivery    @relation(fields: [deliveryId], references: [id])
+  rider    RiderProfile @relation(fields: [riderId], references: [id])
+
+  @@index([deliveryId, createdAt])
+  @@index([riderId, createdAt])
+  @@map("delivery_assignment_events")
+}
+
+
+// ============================================================
+// ORDER STATUS HISTORY
+// ============================================================
+
+model OrderStatusHistory {
+  id String @id @default(uuid()) @db.Uuid
+
+  orderId String @db.Uuid
+
+  fromStatus OrderStatus?
+  toStatus   OrderStatus
+
+  reason String?
+  note   String?
+
+  actorUserId String? @db.Uuid
+
+  createdAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([orderId, createdAt])
+  @@index([toStatus, createdAt])
+  @@map("order_status_history")
+}
+
+
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
+
+model Notification {
+  id String @id @default(uuid()) @db.Uuid
+
+  userId String @db.Uuid
+
+  type NotificationType
+
+  title   String
+  message String
+
+  data Json?
+
+  readAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+
+// ============================================================
+// USER DEVICES
+// ============================================================
+
+model UserDevice {
+  id String @id @default(uuid()) @db.Uuid
+
+  userId String @db.Uuid
+
+  expoPushToken String @unique
+
+  deviceName String?
+  platform   String?
+
+  isActive Boolean @default(true)
+
+  lastSeenAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user          User           @relation(fields: [userId], references: [id])
+  refreshTokens RefreshToken[]
+
+  @@index([userId, isActive])
+  @@map("user_devices")
+}
+
+
+// ============================================================
+// AUDIT LOG
+// ============================================================
+
+model AuditLog {
+  id String @id @default(uuid()) @db.Uuid
+
+  actorUserId String? @db.Uuid
+
+  action AuditAction
+
+  entityType String
+  entityId   String?
+
+  before Json?
+  after  Json?
+
+  metadata Json?
+
+  ipAddress String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  actor User? @relation(fields: [actorUserId], references: [id])
+
+  @@index([actorUserId, createdAt])
+  @@index([entityType, entityId])
+  @@index([action, createdAt])
+  @@map("audit_logs")
+}
+
+
+// ============================================================
+// COMMISSION CONFIGURATION
+// ============================================================
+
+model CommissionConfig {
+  id String @id @default(uuid()) @db.Uuid
+
+  type CommissionType
+
+  // Fixed amount in NGN for MVP.
+  amount Decimal @db.Decimal(12, 2)
+
+  status CommissionConfigStatus @default(ACTIVE)
+
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type, status])
+  @@index([effectiveFrom, effectiveTo])
+  @@map("commission_configs")
+}
+
+
+// ============================================================
+// DELIVERY PRICING CONFIGURATION
+// ============================================================
+
+model DeliveryPricingConfig {
+  id String @id @default(uuid()) @db.Uuid
+
+  name String
+
+  baseFee Decimal @db.Decimal(12, 2)
+
+  perKmFee Decimal @db.Decimal(12, 2)
+
+  minimumFee Decimal @db.Decimal(12, 2)
+
+  maximumFee Decimal? @db.Decimal(12, 2)
+
+  status DeliveryPricingConfigStatus @default(ACTIVE)
+
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([effectiveFrom, effectiveTo])
+  @@map("delivery_pricing_configs")
+}
+
+// ============================================================
+// TRANSACTIONAL OUTBOX
+// ============================================================
+
+model OutboxEvent {
+  id            String            @id @default(uuid()) @db.Uuid
+  eventType     String
+  aggregateType String
+  aggregateId   String
+  payload       Json
+  status        OutboxEventStatus @default(PENDING)
+  attempts      Int               @default(0)
+  lastError     String?
+  scheduledAt   DateTime          @default(now())
+  processedAt   DateTime?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([status, scheduledAt])
+  @@index([aggregateType, aggregateId])
+  @@map("outbox_events")
+}
+

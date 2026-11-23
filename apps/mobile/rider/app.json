@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "name": "CHOVIA Rider",
+    "slug": "chovia-rider",
+    "scheme": "chovia-rider",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "plugins": ["expo-router", "expo-status-bar", "expo-font"],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

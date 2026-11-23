@@ -1,0 +1,24 @@
+{
+  "name": "@chovia/validation",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests --no-cache",
+    "clean": "node -e \"const fs=require('fs'); ['dist','.turbo'].forEach(p=>{if(fs.existsSync(p))fs.rmSync(p,{recursive:true,force:true})})\""
+  },
+  "dependencies": {
+    "@chovia/types": "workspace:*"
+  }
+}

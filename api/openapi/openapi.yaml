@@ -1,0 +1,4451 @@
+# Generated CHOVIA OpenAPI 3.1.0 Specification
+openapi: 3.1.0
+info:
+  title: CHOVIA API
+  description: Official Food Delivery Platform REST API Documentation
+  version: 1.0.0
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Provide JWT Access Token obtained from /api/v1/auth/login
+  schemas: {}
+paths:
+  /health/live:
+    get:
+      tags:
+        - Health
+      description: Application Liveness Probe (checks process uptime)
+      responses:
+        "200":
+          description: Default Response
+  /health/ready:
+    get:
+      tags:
+        - Health
+      description: Application Readiness Probe (verifies PostgreSQL and Redis)
+      responses:
+        "200":
+          description: Default Response
+  /health:
+    get:
+      tags:
+        - Health
+      description: API Health & Infrastructure Connectivity Status Check
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/auth/register:
+    post:
+      tags:
+        - Auth
+      description: Register a new customer account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  maxLength: 255
+                  format: email
+                  pattern: ^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$
+                password:
+                  type: string
+                  minLength: 8
+                  maxLength: 100
+                  pattern: ^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).*$
+                firstName:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                lastName:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                phone:
+                  type: string
+                  pattern: ^\+?[1-9]\d{7,14}$
+              required:
+                - email
+                - password
+                - firstName
+                - lastName
+                - phone
+              additionalProperties: false
+      responses:
+        "201":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                        pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                      email:
+                        type: string
+                        format: email
+                        pattern: ^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$
+                      role:
+                        type: string
+                        enum:
+                          - CUSTOMER
+                          - RESTAURANT_STAFF
+                          - RIDER
+                          - ADMIN
+                      status:
+                        type: string
+                        enum:
+                          - ACTIVE
+                          - SUSPENDED
+                          - DEACTIVATED
+                      emailVerified:
+                        type: boolean
+                      phoneVerified:
+                        type: boolean
+                      firstName:
+                        type:
+                          - string
+                          - "null"
+                      lastName:
+                        type:
+                          - string
+                          - "null"
+                      phone:
+                        type:
+                          - string
+                          - "null"
+                      createdAt:
+                        type: string
+                    required:
+                      - id
+                      - email
+                      - role
+                      - status
+                      - emailVerified
+                      - phoneVerified
+                      - createdAt
+                    additionalProperties: false
+                  otpData:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                      signedToken:
+                        type: string
+                      expiresInMinutes:
+                        type: number
+                    required:
+                      - message
+                      - signedToken
+                      - expiresInMinutes
+                    additionalProperties: false
+                required:
+                  - user
+                  - otpData
+                additionalProperties: false
+  /api/v1/auth/login:
+    post:
+      tags:
+        - Auth
+      description: Log in with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                  pattern: ^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$
+                password:
+                  type: string
+                  minLength: 1
+                deviceInfo:
+                  type: object
+                  properties:
+                    deviceId:
+                      type: string
+                    deviceName:
+                      type: string
+                    deviceType:
+                      default: WEB
+                      type: string
+                      enum:
+                        - IOS
+                        - ANDROID
+                        - WEB
+                    pushToken:
+                      type: string
+              required:
+                - email
+                - password
+              additionalProperties: false
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken:
+                    type: string
+                  refreshToken:
+                    type: string
+                  user:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                        pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                      email:
+                        type: string
+                        format: email
+                        pattern: ^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$
+                      role:
+                        type: string
+                        enum:
+                          - CUSTOMER
+                          - RESTAURANT_STAFF
+                          - RIDER
+                          - ADMIN
+                      status:
+                        type: string
+                        enum:
+                          - ACTIVE
+                          - SUSPENDED
+                          - DEACTIVATED
+                      emailVerified:
+                        type: boolean
+                      phoneVerified:
+                        type: boolean
+                      firstName:
+                        type:
+                          - string
+                          - "null"
+                      lastName:
+                        type:
+                          - string
+                          - "null"
+                      phone:
+                        type:
+                          - string
+                          - "null"
+                      createdAt:
+                        type: string
+                    required:
+                      - id
+                      - email
+                      - role
+                      - status
+                      - emailVerified
+                      - phoneVerified
+                      - createdAt
+                    additionalProperties: false
+                required:
+                  - accessToken
+                  - refreshToken
+                  - user
+                additionalProperties: false
+  /api/v1/auth/refresh:
+    post:
+      tags:
+        - Auth
+      description: Rotate and obtain new access and refresh tokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken:
+                  type: string
+                  minLength: 1
+              required:
+                - refreshToken
+              additionalProperties: false
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken:
+                    type: string
+                  refreshToken:
+                    type: string
+                  user:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                        pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                      email:
+                        type: string
+                        format: email
+                        pattern: ^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$
+                      role:
+                        type: string
+                        enum:
+                          - CUSTOMER
+                          - RESTAURANT_STAFF
+                          - RIDER
+                          - ADMIN
+                      status:
+                        type: string
+                        enum:
+                          - ACTIVE
+                          - SUSPENDED
+                          - DEACTIVATED
+                      emailVerified:
+                        type: boolean
+                      phoneVerified:
+                        type: boolean
+                      firstName:
+                        type:
+                          - string
+                          - "null"
+                      lastName:
+                        type:
+                          - string
+                          - "null"
+                      phone:
+                        type:
+                          - string
+                          - "null"
+                      createdAt:
+                        type: string
+                    required:
+                      - id
+                      - email
+                      - role
+                      - status
+                      - emailVerified
+                      - phoneVerified
+                      - createdAt
+                    additionalProperties: false
+                required:
+                  - accessToken
+                  - refreshToken
+                  - user
+                additionalProperties: false
+  /api/v1/auth/logout:
+    post:
+      tags:
+        - Auth
+      description: Log out and revoke refresh token session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken:
+                  type: string
+                  minLength: 1
+              required:
+                - refreshToken
+              additionalProperties: false
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  success:
+                    default: true
+                    type: boolean
+                required:
+                  - message
+                  - success
+                additionalProperties: false
+  /api/v1/auth/verify-email/request:
+    post:
+      tags:
+        - Auth
+      description: Request an email verification OTP code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                  pattern: ^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$
+              required:
+                - email
+              additionalProperties: false
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  signedToken:
+                    type: string
+                  expiresInMinutes:
+                    type: number
+                required:
+                  - message
+                  - signedToken
+                  - expiresInMinutes
+                additionalProperties: false
+  /api/v1/auth/verify-email/verify:
+    post:
+      tags:
+        - Auth
+      description: Verify email with 6-digit OTP code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                  pattern: ^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$
+                otp:
+                  type: string
+                  pattern: ^\d{6}$
+                signedToken:
+                  type: string
+                  minLength: 1
+              required:
+                - email
+                - otp
+                - signedToken
+              additionalProperties: false
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  success:
+                    default: true
+                    type: boolean
+                required:
+                  - message
+                  - success
+                additionalProperties: false
+  /api/v1/auth/password-reset/request:
+    post:
+      tags:
+        - Auth
+      description: Request a password reset OTP code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                  pattern: ^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$
+              required:
+                - email
+              additionalProperties: false
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  signedToken:
+                    type: string
+                  expiresInMinutes:
+                    type: number
+                required:
+                  - message
+                  - signedToken
+                  - expiresInMinutes
+                additionalProperties: false
+  /api/v1/auth/password-reset/verify:
+    post:
+      tags:
+        - Auth
+      description: Verify password reset OTP and obtain reset token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                  pattern: ^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$
+                otp:
+                  type: string
+                  pattern: ^\d{6}$
+                signedToken:
+                  type: string
+                  minLength: 1
+              required:
+                - email
+                - otp
+                - signedToken
+              additionalProperties: false
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  resetToken:
+                    type: string
+                  success:
+                    type: boolean
+                required:
+                  - message
+                  - resetToken
+                  - success
+                additionalProperties: false
+  /api/v1/auth/password-reset/complete:
+    post:
+      tags:
+        - Auth
+      description: Complete password reset using reset token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                  pattern: ^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$
+                resetToken:
+                  type: string
+                  minLength: 1
+                newPassword:
+                  type: string
+                  minLength: 8
+                  maxLength: 100
+                  pattern: ^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).*$
+              required:
+                - email
+                - resetToken
+                - newPassword
+              additionalProperties: false
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  success:
+                    default: true
+                    type: boolean
+                required:
+                  - message
+                  - success
+                additionalProperties: false
+  /api/v1/auth/me:
+    get:
+      tags:
+        - Auth
+      description: Get currently authenticated user profile
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  email:
+                    type: string
+                    format: email
+                    pattern: ^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$
+                  role:
+                    type: string
+                    enum:
+                      - CUSTOMER
+                      - RESTAURANT_STAFF
+                      - RIDER
+                      - ADMIN
+                  status:
+                    type: string
+                    enum:
+                      - ACTIVE
+                      - SUSPENDED
+                      - DEACTIVATED
+                  emailVerified:
+                    type: boolean
+                  phoneVerified:
+                    type: boolean
+                  firstName:
+                    type:
+                      - string
+                      - "null"
+                  lastName:
+                    type:
+                      - string
+                      - "null"
+                  phone:
+                    type:
+                      - string
+                      - "null"
+                  createdAt:
+                    type: string
+                required:
+                  - id
+                  - email
+                  - role
+                  - status
+                  - emailVerified
+                  - phoneVerified
+                  - createdAt
+                additionalProperties: false
+  /api/v1/users/profile:
+    get:
+      tags:
+        - Users
+      description: Get authenticated user profile
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  email:
+                    type: string
+                    format: email
+                    pattern: ^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$
+                  role:
+                    type: string
+                    enum:
+                      - CUSTOMER
+                      - RESTAURANT_STAFF
+                      - RIDER
+                      - ADMIN
+                  status:
+                    type: string
+                    enum:
+                      - ACTIVE
+                      - SUSPENDED
+                      - DEACTIVATED
+                  emailVerified:
+                    type: boolean
+                  phoneVerified:
+                    type: boolean
+                  firstName:
+                    type:
+                      - string
+                      - "null"
+                  lastName:
+                    type:
+                      - string
+                      - "null"
+                  phone:
+                    type:
+                      - string
+                      - "null"
+                  createdAt:
+                    type: string
+                required:
+                  - id
+                  - email
+                  - role
+                  - status
+                  - emailVerified
+                  - phoneVerified
+                  - createdAt
+                additionalProperties: false
+    patch:
+      tags:
+        - Users
+      description: Update authenticated user profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                firstName:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                lastName:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                phone:
+                  type: string
+                  pattern: ^\+?[1-9]\d{7,14}$
+                image:
+                  type: string
+                  format: uri
+              additionalProperties: false
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  email:
+                    type: string
+                    format: email
+                    pattern: ^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$
+                  role:
+                    type: string
+                    enum:
+                      - CUSTOMER
+                      - RESTAURANT_STAFF
+                      - RIDER
+                      - ADMIN
+                  status:
+                    type: string
+                    enum:
+                      - ACTIVE
+                      - SUSPENDED
+                      - DEACTIVATED
+                  emailVerified:
+                    type: boolean
+                  phoneVerified:
+                    type: boolean
+                  firstName:
+                    type:
+                      - string
+                      - "null"
+                  lastName:
+                    type:
+                      - string
+                      - "null"
+                  phone:
+                    type:
+                      - string
+                      - "null"
+                  createdAt:
+                    type: string
+                required:
+                  - id
+                  - email
+                  - role
+                  - status
+                  - emailVerified
+                  - phoneVerified
+                  - createdAt
+                additionalProperties: false
+  /api/v1/users/devices:
+    get:
+      tags:
+        - Users
+      description: List registered devices for authenticated user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                      format: uuid
+                      pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                    expoPushToken:
+                      type: string
+                    deviceName:
+                      type:
+                        - string
+                        - "null"
+                    platform:
+                      type:
+                        - string
+                        - "null"
+                    isActive:
+                      type: boolean
+                    lastSeenAt:
+                      type:
+                        - string
+                        - "null"
+                    createdAt:
+                      type: string
+                  required:
+                    - id
+                    - expoPushToken
+                    - isActive
+                    - createdAt
+                  additionalProperties: false
+    post:
+      tags:
+        - Users
+      description: Register or update user device push token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expoPushToken:
+                  type: string
+                  minLength: 1
+                deviceName:
+                  type: string
+                  maxLength: 100
+                platform:
+                  default: web
+                  type: string
+                  enum:
+                    - ios
+                    - android
+                    - web
+              required:
+                - expoPushToken
+              additionalProperties: false
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  expoPushToken:
+                    type: string
+                  deviceName:
+                    type:
+                      - string
+                      - "null"
+                  platform:
+                    type:
+                      - string
+                      - "null"
+                  isActive:
+                    type: boolean
+                  lastSeenAt:
+                    type:
+                      - string
+                      - "null"
+                  createdAt:
+                    type: string
+                required:
+                  - id
+                  - expoPushToken
+                  - isActive
+                  - createdAt
+                additionalProperties: false
+  /api/v1/users/devices/{deviceId}:
+    delete:
+      tags:
+        - Users
+      description: Unregister user device session
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+          in: path
+          name: deviceId
+          required: true
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  success:
+                    type: boolean
+                required:
+                  - message
+                  - success
+                additionalProperties: false
+  /api/v1/users/upload-signature:
+    post:
+      tags:
+        - Users
+        - Uploads
+      description: Generate signed Cloudinary upload parameters for direct client upload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                folder:
+                  type: string
+                  enum:
+                    - avatars
+                    - restaurants
+                    - menu
+                    - documents
+                restaurantId:
+                  type: string
+                  format: uuid
+                  pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                mimeType:
+                  type: string
+                  enum:
+                    - image/jpeg
+                    - image/png
+                    - image/webp
+                    - application/pdf
+                fileSizeBytes:
+                  type: integer
+                  exclusiveMinimum: 0
+                  maximum: 10485760
+                customPublicId:
+                  type: string
+                  maxLength: 200
+              required:
+                - folder
+              additionalProperties: false
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  signature:
+                    type: string
+                  timestamp:
+                    type: number
+                  cloudName:
+                    type: string
+                  apiKey:
+                    type: string
+                  folder:
+                    type: string
+                  allowedFormats:
+                    type: array
+                    items:
+                      type: string
+                  maxFileSize:
+                    type: number
+                  resourceType:
+                    type: string
+                  publicId:
+                    type: string
+                required:
+                  - signature
+                  - timestamp
+                  - cloudName
+                  - apiKey
+                  - folder
+                  - allowedFormats
+                  - maxFileSize
+                  - resourceType
+                additionalProperties: false
+  /api/v1/users/upload-image:
+    post:
+      tags:
+        - Users
+        - Uploads
+      description: Upload image directly to Cloudinary via server
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  minLength: 1
+                folder:
+                  type: string
+                  enum:
+                    - avatars
+                    - restaurants
+                    - menu
+                    - documents
+                restaurantId:
+                  type: string
+                  format: uuid
+                  pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                mimeType:
+                  type: string
+                  enum:
+                    - image/jpeg
+                    - image/png
+                    - image/webp
+                    - application/pdf
+                fileSizeBytes:
+                  type: integer
+                  exclusiveMinimum: 0
+                  maximum: 10485760
+                customPublicId:
+                  type: string
+                  maxLength: 200
+              required:
+                - file
+                - folder
+              additionalProperties: false
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  publicId:
+                    type: string
+                  secureUrl:
+                    type: string
+                  width:
+                    type: number
+                  height:
+                    type: number
+                  format:
+                    type: string
+                  bytes:
+                    type: number
+                required:
+                  - publicId
+                  - secureUrl
+                additionalProperties: false
+  /api/v1/restaurants/:
+    get:
+      tags:
+        - Restaurants
+      description: List approved active restaurants with optional location and cuisine
+        filters
+      parameters:
+        - schema:
+            type: string
+          in: query
+          name: search
+          required: false
+        - schema:
+            type: string
+            format: uuid
+            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+          in: query
+          name: cuisineId
+          required: false
+        - schema:
+            type: number
+            minimum: -90
+            maximum: 90
+          in: query
+          name: latitude
+          required: false
+        - schema:
+            type: number
+            minimum: -180
+            maximum: 180
+          in: query
+          name: longitude
+          required: false
+        - schema:
+            default: 10
+            type: number
+            exclusiveMinimum: 0
+            maximum: 50
+          in: query
+          name: radiusKm
+          required: false
+        - schema:
+            default: 1
+            type: integer
+            exclusiveMinimum: 0
+            maximum: 9007199254740991
+          in: query
+          name: page
+          required: false
+        - schema:
+            default: 20
+            type: integer
+            exclusiveMinimum: 0
+            maximum: 100
+          in: query
+          name: limit
+          required: false
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  restaurants:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        name:
+                          type: string
+                        description:
+                          type:
+                            - string
+                            - "null"
+                        phone:
+                          type: string
+                        email:
+                          type:
+                            - string
+                            - "null"
+                        address:
+                          type: string
+                        latitude:
+                          type: number
+                        longitude:
+                          type: number
+                        maxDeliveryDistanceKm:
+                          type: number
+                        status:
+                          type: string
+                          enum:
+                            - PENDING_APPROVAL
+                            - ACTIVE
+                            - REJECTED
+                            - SUSPENDED
+                        availability:
+                          type: string
+                          enum:
+                            - OPEN
+                            - CLOSED
+                            - SUSPENDED
+                        distanceKm:
+                          type: number
+                        cuisines:
+                          type: array
+                          items:
+                            type: string
+                        createdAt:
+                          type: string
+                      required:
+                        - id
+                        - name
+                        - phone
+                        - address
+                        - latitude
+                        - longitude
+                        - maxDeliveryDistanceKm
+                        - status
+                        - availability
+                        - createdAt
+                      additionalProperties: false
+                  total:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  page:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  limit:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                required:
+                  - restaurants
+                  - total
+                  - page
+                  - limit
+                additionalProperties: false
+    post:
+      tags:
+        - Restaurants
+      description: Register a new restaurant (creates pending approval)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  minLength: 2
+                  maxLength: 100
+                description:
+                  type: string
+                  maxLength: 500
+                phone:
+                  type: string
+                  pattern: ^\+?[1-9]\d{7,14}$
+                email:
+                  type: string
+                  format: email
+                  pattern: ^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$
+                address:
+                  type: string
+                  minLength: 5
+                  maxLength: 255
+                latitude:
+                  type: number
+                  minimum: -90
+                  maximum: 90
+                longitude:
+                  type: number
+                  minimum: -180
+                  maximum: 180
+                maxDeliveryDistanceKm:
+                  default: 15
+                  type: number
+                  exclusiveMinimum: 0
+                  maximum: 30
+                cuisineIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+              required:
+                - name
+                - phone
+                - address
+                - latitude
+                - longitude
+              additionalProperties: false
+      security:
+        - bearerAuth: []
+      responses:
+        "201":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  name:
+                    type: string
+                  description:
+                    type:
+                      - string
+                      - "null"
+                  phone:
+                    type: string
+                  email:
+                    type:
+                      - string
+                      - "null"
+                  address:
+                    type: string
+                  latitude:
+                    type: number
+                  longitude:
+                    type: number
+                  maxDeliveryDistanceKm:
+                    type: number
+                  status:
+                    type: string
+                    enum:
+                      - PENDING_APPROVAL
+                      - ACTIVE
+                      - REJECTED
+                      - SUSPENDED
+                  availability:
+                    type: string
+                    enum:
+                      - OPEN
+                      - CLOSED
+                      - SUSPENDED
+                  distanceKm:
+                    type: number
+                  cuisines:
+                    type: array
+                    items:
+                      type: string
+                  createdAt:
+                    type: string
+                required:
+                  - id
+                  - name
+                  - phone
+                  - address
+                  - latitude
+                  - longitude
+                  - maxDeliveryDistanceKm
+                  - status
+                  - availability
+                  - createdAt
+                additionalProperties: false
+  /api/v1/restaurants/{id}:
+    get:
+      tags:
+        - Restaurants
+      description: Get detailed restaurant information by ID
+      parameters:
+        - schema:
+            type: string
+          in: query
+          name: lat
+          required: false
+        - schema:
+            type: string
+          in: query
+          name: lng
+          required: false
+        - schema:
+            type: string
+            format: uuid
+            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+          in: path
+          name: id
+          required: true
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  name:
+                    type: string
+                  description:
+                    type:
+                      - string
+                      - "null"
+                  phone:
+                    type: string
+                  email:
+                    type:
+                      - string
+                      - "null"
+                  address:
+                    type: string
+                  latitude:
+                    type: number
+                  longitude:
+                    type: number
+                  maxDeliveryDistanceKm:
+                    type: number
+                  status:
+                    type: string
+                    enum:
+                      - PENDING_APPROVAL
+                      - ACTIVE
+                      - REJECTED
+                      - SUSPENDED
+                  availability:
+                    type: string
+                    enum:
+                      - OPEN
+                      - CLOSED
+                      - SUSPENDED
+                  distanceKm:
+                    type: number
+                  cuisines:
+                    type: array
+                    items:
+                      type: string
+                  createdAt:
+                    type: string
+                required:
+                  - id
+                  - name
+                  - phone
+                  - address
+                  - latitude
+                  - longitude
+                  - maxDeliveryDistanceKm
+                  - status
+                  - availability
+                  - createdAt
+                additionalProperties: false
+    patch:
+      tags:
+        - Restaurants
+      description: Update restaurant details (Staff or Admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  minLength: 2
+                  maxLength: 100
+                description:
+                  type: string
+                  maxLength: 500
+                phone:
+                  type: string
+                  pattern: ^\+?[1-9]\d{7,14}$
+                email:
+                  type: string
+                  format: email
+                  pattern: ^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$
+                address:
+                  type: string
+                  minLength: 5
+                  maxLength: 255
+                latitude:
+                  type: number
+                  minimum: -90
+                  maximum: 90
+                longitude:
+                  type: number
+                  minimum: -180
+                  maximum: 180
+                maxDeliveryDistanceKm:
+                  type: number
+                  exclusiveMinimum: 0
+                  maximum: 30
+              additionalProperties: false
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+          in: path
+          name: id
+          required: true
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  name:
+                    type: string
+                  description:
+                    type:
+                      - string
+                      - "null"
+                  phone:
+                    type: string
+                  email:
+                    type:
+                      - string
+                      - "null"
+                  address:
+                    type: string
+                  latitude:
+                    type: number
+                  longitude:
+                    type: number
+                  maxDeliveryDistanceKm:
+                    type: number
+                  status:
+                    type: string
+                    enum:
+                      - PENDING_APPROVAL
+                      - ACTIVE
+                      - REJECTED
+                      - SUSPENDED
+                  availability:
+                    type: string
+                    enum:
+                      - OPEN
+                      - CLOSED
+                      - SUSPENDED
+                  distanceKm:
+                    type: number
+                  cuisines:
+                    type: array
+                    items:
+                      type: string
+                  createdAt:
+                    type: string
+                required:
+                  - id
+                  - name
+                  - phone
+                  - address
+                  - latitude
+                  - longitude
+                  - maxDeliveryDistanceKm
+                  - status
+                  - availability
+                  - createdAt
+                additionalProperties: false
+  /api/v1/restaurants/{id}/availability:
+    patch:
+      tags:
+        - Restaurants
+      description: Update restaurant open/closed status (Staff or Admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                availability:
+                  type: string
+                  enum:
+                    - OPEN
+                    - CLOSED
+                    - SUSPENDED
+                manualClosure:
+                  type: boolean
+              required:
+                - availability
+              additionalProperties: false
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+          in: path
+          name: id
+          required: true
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  name:
+                    type: string
+                  description:
+                    type:
+                      - string
+                      - "null"
+                  phone:
+                    type: string
+                  email:
+                    type:
+                      - string
+                      - "null"
+                  address:
+                    type: string
+                  latitude:
+                    type: number
+                  longitude:
+                    type: number
+                  maxDeliveryDistanceKm:
+                    type: number
+                  status:
+                    type: string
+                    enum:
+                      - PENDING_APPROVAL
+                      - ACTIVE
+                      - REJECTED
+                      - SUSPENDED
+                  availability:
+                    type: string
+                    enum:
+                      - OPEN
+                      - CLOSED
+                      - SUSPENDED
+                  distanceKm:
+                    type: number
+                  cuisines:
+                    type: array
+                    items:
+                      type: string
+                  createdAt:
+                    type: string
+                required:
+                  - id
+                  - name
+                  - phone
+                  - address
+                  - latitude
+                  - longitude
+                  - maxDeliveryDistanceKm
+                  - status
+                  - availability
+                  - createdAt
+                additionalProperties: false
+  /api/v1/staff/invitations/accept:
+    post:
+      tags:
+        - Staff
+      description: Accept a staff invitation and establish account password
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/staff/restaurants/{restaurantId}/staff/invite:
+    post:
+      tags:
+        - Staff
+      description: Invite a new staff member to restaurant
+      security:
+        - bearerAuth: []
+      parameters:
+        - schema:
+            type: string
+          in: path
+          name: restaurantId
+          required: true
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/staff/restaurants/{restaurantId}/staff:
+    get:
+      tags:
+        - Staff
+      description: List staff members for a restaurant
+      security:
+        - bearerAuth: []
+      parameters:
+        - schema:
+            type: string
+          in: path
+          name: restaurantId
+          required: true
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/staff/restaurants/{restaurantId}/staff/{staffId}:
+    delete:
+      tags:
+        - Staff
+      description: Revoke staff membership from a restaurant
+      security:
+        - bearerAuth: []
+      parameters:
+        - schema:
+            type: string
+          in: path
+          name: restaurantId
+          required: true
+        - schema:
+            type: string
+          in: path
+          name: staffId
+          required: true
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/restaurants/{restaurantId}/menu:
+    get:
+      tags:
+        - Menu
+      description: Get full active menu for a restaurant organized by category
+      parameters:
+        - schema:
+            type: string
+          in: path
+          name: restaurantId
+          required: true
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/restaurants/{restaurantId}/categories:
+    post:
+      tags:
+        - Menu
+      description: Create a new menu category
+      security:
+        - bearerAuth: []
+      parameters:
+        - schema:
+            type: string
+          in: path
+          name: restaurantId
+          required: true
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/restaurants/{restaurantId}/categories/{categoryId}:
+    patch:
+      tags:
+        - Menu
+      description: Update an existing menu category
+      security:
+        - bearerAuth: []
+      parameters:
+        - schema:
+            type: string
+          in: path
+          name: restaurantId
+          required: true
+        - schema:
+            type: string
+          in: path
+          name: categoryId
+          required: true
+      responses:
+        "200":
+          description: Default Response
+    delete:
+      tags:
+        - Menu
+      description: Archive a menu category and its items
+      security:
+        - bearerAuth: []
+      parameters:
+        - schema:
+            type: string
+          in: path
+          name: restaurantId
+          required: true
+        - schema:
+            type: string
+          in: path
+          name: categoryId
+          required: true
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/restaurants/{restaurantId}/items:
+    post:
+      tags:
+        - Menu
+      description: Create a new menu item
+      security:
+        - bearerAuth: []
+      parameters:
+        - schema:
+            type: string
+          in: path
+          name: restaurantId
+          required: true
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/restaurants/{restaurantId}/items/{itemId}:
+    patch:
+      tags:
+        - Menu
+      description: Update a menu item
+      security:
+        - bearerAuth: []
+      parameters:
+        - schema:
+            type: string
+          in: path
+          name: restaurantId
+          required: true
+        - schema:
+            type: string
+          in: path
+          name: itemId
+          required: true
+      responses:
+        "200":
+          description: Default Response
+    delete:
+      tags:
+        - Menu
+      description: Archive a menu item
+      security:
+        - bearerAuth: []
+      parameters:
+        - schema:
+            type: string
+          in: path
+          name: restaurantId
+          required: true
+        - schema:
+            type: string
+          in: path
+          name: itemId
+          required: true
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/restaurants/{restaurantId}/items/{itemId}/availability:
+    patch:
+      tags:
+        - Menu
+      description: Toggle menu item availability
+      security:
+        - bearerAuth: []
+      parameters:
+        - schema:
+            type: string
+          in: path
+          name: restaurantId
+          required: true
+        - schema:
+            type: string
+          in: path
+          name: itemId
+          required: true
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/addresses/:
+    get:
+      tags:
+        - Addresses
+      description: List delivery addresses for authenticated customer
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                      format: uuid
+                      pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                    label:
+                      type: string
+                    addressText:
+                      type: string
+                    latitude:
+                      type: number
+                    longitude:
+                      type: number
+                    isDefault:
+                      type: boolean
+                    createdAt:
+                      type: string
+                  required:
+                    - id
+                    - label
+                    - addressText
+                    - latitude
+                    - longitude
+                    - isDefault
+                    - createdAt
+                  additionalProperties: false
+    post:
+      tags:
+        - Addresses
+      description: Create a new saved delivery address
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label:
+                  type: string
+                  minLength: 1
+                  maxLength: 50
+                addressText:
+                  type: string
+                  minLength: 5
+                  maxLength: 255
+                latitude:
+                  type: number
+                  minimum: -90
+                  maximum: 90
+                longitude:
+                  type: number
+                  minimum: -180
+                  maximum: 180
+                isDefault:
+                  default: false
+                  type: boolean
+              required:
+                - label
+                - addressText
+                - latitude
+                - longitude
+              additionalProperties: false
+      security:
+        - bearerAuth: []
+      responses:
+        "201":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  label:
+                    type: string
+                  addressText:
+                    type: string
+                  latitude:
+                    type: number
+                  longitude:
+                    type: number
+                  isDefault:
+                    type: boolean
+                  createdAt:
+                    type: string
+                required:
+                  - id
+                  - label
+                  - addressText
+                  - latitude
+                  - longitude
+                  - isDefault
+                  - createdAt
+                additionalProperties: false
+  /api/v1/addresses/{id}:
+    patch:
+      tags:
+        - Addresses
+      description: Update a saved delivery address
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label:
+                  type: string
+                  minLength: 1
+                  maxLength: 50
+                addressText:
+                  type: string
+                  minLength: 5
+                  maxLength: 255
+                latitude:
+                  type: number
+                  minimum: -90
+                  maximum: 90
+                longitude:
+                  type: number
+                  minimum: -180
+                  maximum: 180
+                isDefault:
+                  type: boolean
+              additionalProperties: false
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+          in: path
+          name: id
+          required: true
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  label:
+                    type: string
+                  addressText:
+                    type: string
+                  latitude:
+                    type: number
+                  longitude:
+                    type: number
+                  isDefault:
+                    type: boolean
+                  createdAt:
+                    type: string
+                required:
+                  - id
+                  - label
+                  - addressText
+                  - latitude
+                  - longitude
+                  - isDefault
+                  - createdAt
+                additionalProperties: false
+    delete:
+      tags:
+        - Addresses
+      description: Delete a saved delivery address
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+          in: path
+          name: id
+          required: true
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  success:
+                    type: boolean
+                required:
+                  - message
+                  - success
+                additionalProperties: false
+  /api/v1/addresses/{id}/default:
+    patch:
+      tags:
+        - Addresses
+      description: Set an address as customer default
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+          in: path
+          name: id
+          required: true
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  label:
+                    type: string
+                  addressText:
+                    type: string
+                  latitude:
+                    type: number
+                  longitude:
+                    type: number
+                  isDefault:
+                    type: boolean
+                  createdAt:
+                    type: string
+                required:
+                  - id
+                  - label
+                  - addressText
+                  - latitude
+                  - longitude
+                  - isDefault
+                  - createdAt
+                additionalProperties: false
+  /api/v1/cart/:
+    get:
+      tags:
+        - Cart
+      description: Get authenticated customer cart with authoritative price calculations
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+          in: query
+          name: addressId
+          required: false
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  restaurantId:
+                    anyOf:
+                      - type: string
+                        format: uuid
+                        pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                      - type: "null"
+                  restaurantName:
+                    type:
+                      - string
+                      - "null"
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        menuItemId:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        name:
+                          type: string
+                        priceMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        priceFormatted:
+                          type: string
+                        quantity:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        itemTotalMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        itemTotalFormatted:
+                          type: string
+                        imageUrl:
+                          type:
+                            - string
+                            - "null"
+                        availability:
+                          type: string
+                          enum:
+                            - AVAILABLE
+                            - UNAVAILABLE
+                      required:
+                        - id
+                        - menuItemId
+                        - name
+                        - priceMinor
+                        - priceFormatted
+                        - quantity
+                        - itemTotalMinor
+                        - itemTotalFormatted
+                        - availability
+                      additionalProperties: false
+                  itemCount:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  pricing:
+                    type: object
+                    properties:
+                      currency:
+                        type: string
+                      subtotalMinor:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      subtotalFormatted:
+                        type: string
+                      deliveryFeeMinor:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      deliveryFeeFormatted:
+                        type: string
+                      platformFeeMinor:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      platformFeeFormatted:
+                        type: string
+                      totalMinor:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      totalFormatted:
+                        type: string
+                    required:
+                      - currency
+                      - subtotalMinor
+                      - subtotalFormatted
+                      - deliveryFeeMinor
+                      - deliveryFeeFormatted
+                      - platformFeeMinor
+                      - platformFeeFormatted
+                      - totalMinor
+                      - totalFormatted
+                    additionalProperties: false
+                required:
+                  - id
+                  - items
+                  - itemCount
+                  - pricing
+                additionalProperties: false
+    delete:
+      tags:
+        - Cart
+      description: Clear all items from cart
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  restaurantId:
+                    anyOf:
+                      - type: string
+                        format: uuid
+                        pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                      - type: "null"
+                  restaurantName:
+                    type:
+                      - string
+                      - "null"
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        menuItemId:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        name:
+                          type: string
+                        priceMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        priceFormatted:
+                          type: string
+                        quantity:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        itemTotalMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        itemTotalFormatted:
+                          type: string
+                        imageUrl:
+                          type:
+                            - string
+                            - "null"
+                        availability:
+                          type: string
+                          enum:
+                            - AVAILABLE
+                            - UNAVAILABLE
+                      required:
+                        - id
+                        - menuItemId
+                        - name
+                        - priceMinor
+                        - priceFormatted
+                        - quantity
+                        - itemTotalMinor
+                        - itemTotalFormatted
+                        - availability
+                      additionalProperties: false
+                  itemCount:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  pricing:
+                    type: object
+                    properties:
+                      currency:
+                        type: string
+                      subtotalMinor:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      subtotalFormatted:
+                        type: string
+                      deliveryFeeMinor:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      deliveryFeeFormatted:
+                        type: string
+                      platformFeeMinor:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      platformFeeFormatted:
+                        type: string
+                      totalMinor:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      totalFormatted:
+                        type: string
+                    required:
+                      - currency
+                      - subtotalMinor
+                      - subtotalFormatted
+                      - deliveryFeeMinor
+                      - deliveryFeeFormatted
+                      - platformFeeMinor
+                      - platformFeeFormatted
+                      - totalMinor
+                      - totalFormatted
+                    additionalProperties: false
+                required:
+                  - id
+                  - items
+                  - itemCount
+                  - pricing
+                additionalProperties: false
+  /api/v1/cart/items:
+    post:
+      tags:
+        - Cart
+      description: Add item to customer cart (enforces one-restaurant rule)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                menuItemId:
+                  type: string
+                  format: uuid
+                  pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                quantity:
+                  default: 1
+                  type: integer
+                  minimum: 1
+                  maximum: 50
+                clearCartIfDifferentRestaurant:
+                  default: false
+                  type: boolean
+              required:
+                - menuItemId
+              additionalProperties: false
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  restaurantId:
+                    anyOf:
+                      - type: string
+                        format: uuid
+                        pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                      - type: "null"
+                  restaurantName:
+                    type:
+                      - string
+                      - "null"
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        menuItemId:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        name:
+                          type: string
+                        priceMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        priceFormatted:
+                          type: string
+                        quantity:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        itemTotalMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        itemTotalFormatted:
+                          type: string
+                        imageUrl:
+                          type:
+                            - string
+                            - "null"
+                        availability:
+                          type: string
+                          enum:
+                            - AVAILABLE
+                            - UNAVAILABLE
+                      required:
+                        - id
+                        - menuItemId
+                        - name
+                        - priceMinor
+                        - priceFormatted
+                        - quantity
+                        - itemTotalMinor
+                        - itemTotalFormatted
+                        - availability
+                      additionalProperties: false
+                  itemCount:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  pricing:
+                    type: object
+                    properties:
+                      currency:
+                        type: string
+                      subtotalMinor:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      subtotalFormatted:
+                        type: string
+                      deliveryFeeMinor:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      deliveryFeeFormatted:
+                        type: string
+                      platformFeeMinor:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      platformFeeFormatted:
+                        type: string
+                      totalMinor:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      totalFormatted:
+                        type: string
+                    required:
+                      - currency
+                      - subtotalMinor
+                      - subtotalFormatted
+                      - deliveryFeeMinor
+                      - deliveryFeeFormatted
+                      - platformFeeMinor
+                      - platformFeeFormatted
+                      - totalMinor
+                      - totalFormatted
+                    additionalProperties: false
+                required:
+                  - id
+                  - items
+                  - itemCount
+                  - pricing
+                additionalProperties: false
+  /api/v1/cart/items/{id}:
+    patch:
+      tags:
+        - Cart
+      description: Update item quantity in cart
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                quantity:
+                  type: integer
+                  minimum: 1
+                  maximum: 50
+              required:
+                - quantity
+              additionalProperties: false
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+          in: path
+          name: id
+          required: true
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  restaurantId:
+                    anyOf:
+                      - type: string
+                        format: uuid
+                        pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                      - type: "null"
+                  restaurantName:
+                    type:
+                      - string
+                      - "null"
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        menuItemId:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        name:
+                          type: string
+                        priceMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        priceFormatted:
+                          type: string
+                        quantity:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        itemTotalMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        itemTotalFormatted:
+                          type: string
+                        imageUrl:
+                          type:
+                            - string
+                            - "null"
+                        availability:
+                          type: string
+                          enum:
+                            - AVAILABLE
+                            - UNAVAILABLE
+                      required:
+                        - id
+                        - menuItemId
+                        - name
+                        - priceMinor
+                        - priceFormatted
+                        - quantity
+                        - itemTotalMinor
+                        - itemTotalFormatted
+                        - availability
+                      additionalProperties: false
+                  itemCount:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  pricing:
+                    type: object
+                    properties:
+                      currency:
+                        type: string
+                      subtotalMinor:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      subtotalFormatted:
+                        type: string
+                      deliveryFeeMinor:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      deliveryFeeFormatted:
+                        type: string
+                      platformFeeMinor:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      platformFeeFormatted:
+                        type: string
+                      totalMinor:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      totalFormatted:
+                        type: string
+                    required:
+                      - currency
+                      - subtotalMinor
+                      - subtotalFormatted
+                      - deliveryFeeMinor
+                      - deliveryFeeFormatted
+                      - platformFeeMinor
+                      - platformFeeFormatted
+                      - totalMinor
+                      - totalFormatted
+                    additionalProperties: false
+                required:
+                  - id
+                  - items
+                  - itemCount
+                  - pricing
+                additionalProperties: false
+    delete:
+      tags:
+        - Cart
+      description: Remove item from cart
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+          in: path
+          name: id
+          required: true
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  restaurantId:
+                    anyOf:
+                      - type: string
+                        format: uuid
+                        pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                      - type: "null"
+                  restaurantName:
+                    type:
+                      - string
+                      - "null"
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        menuItemId:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        name:
+                          type: string
+                        priceMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        priceFormatted:
+                          type: string
+                        quantity:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        itemTotalMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        itemTotalFormatted:
+                          type: string
+                        imageUrl:
+                          type:
+                            - string
+                            - "null"
+                        availability:
+                          type: string
+                          enum:
+                            - AVAILABLE
+                            - UNAVAILABLE
+                      required:
+                        - id
+                        - menuItemId
+                        - name
+                        - priceMinor
+                        - priceFormatted
+                        - quantity
+                        - itemTotalMinor
+                        - itemTotalFormatted
+                        - availability
+                      additionalProperties: false
+                  itemCount:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  pricing:
+                    type: object
+                    properties:
+                      currency:
+                        type: string
+                      subtotalMinor:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      subtotalFormatted:
+                        type: string
+                      deliveryFeeMinor:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      deliveryFeeFormatted:
+                        type: string
+                      platformFeeMinor:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      platformFeeFormatted:
+                        type: string
+                      totalMinor:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      totalFormatted:
+                        type: string
+                    required:
+                      - currency
+                      - subtotalMinor
+                      - subtotalFormatted
+                      - deliveryFeeMinor
+                      - deliveryFeeFormatted
+                      - platformFeeMinor
+                      - platformFeeFormatted
+                      - totalMinor
+                      - totalFormatted
+                    additionalProperties: false
+                required:
+                  - id
+                  - items
+                  - itemCount
+                  - pricing
+                additionalProperties: false
+  /api/v1/orders/checkout:
+    post:
+      tags:
+        - Orders
+      description: Checkout cart into a formal order (with server-side pricing and
+        idempotency)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                addressId:
+                  type: string
+                  format: uuid
+                  pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                idempotencyKey:
+                  type: string
+                notes:
+                  type: string
+                  maxLength: 255
+              required:
+                - addressId
+              additionalProperties: false
+      security:
+        - bearerAuth: []
+      responses:
+        "201":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  orderNumber:
+                    type: string
+                  restaurantId:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  restaurantName:
+                    type: string
+                  customerId:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  status:
+                    type: string
+                  subtotalMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  subtotalFormatted:
+                    type: string
+                  deliveryFeeMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  deliveryFeeFormatted:
+                    type: string
+                  totalAmountMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  totalAmountFormatted:
+                    type: string
+                  deliveryAddressText:
+                    type: string
+                  deliveryDistanceKm:
+                    type:
+                      - number
+                      - "null"
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        itemName:
+                          type: string
+                        unitPriceMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        unitPriceFormatted:
+                          type: string
+                        quantity:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        lineTotalMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        lineTotalFormatted:
+                          type: string
+                      required:
+                        - id
+                        - itemName
+                        - unitPriceMinor
+                        - unitPriceFormatted
+                        - quantity
+                        - lineTotalMinor
+                        - lineTotalFormatted
+                      additionalProperties: false
+                  statusHistory:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        fromStatus:
+                          type:
+                            - string
+                            - "null"
+                        toStatus:
+                          type: string
+                        reason:
+                          type:
+                            - string
+                            - "null"
+                        createdAt:
+                          type: string
+                      required:
+                        - id
+                        - toStatus
+                        - createdAt
+                      additionalProperties: false
+                  paymentStatus:
+                    type: string
+                  rejectionReason:
+                    type:
+                      - string
+                      - "null"
+                  cancelledReason:
+                    type:
+                      - string
+                      - "null"
+                  createdAt:
+                    type: string
+                required:
+                  - id
+                  - orderNumber
+                  - restaurantId
+                  - restaurantName
+                  - customerId
+                  - status
+                  - subtotalMinor
+                  - subtotalFormatted
+                  - deliveryFeeMinor
+                  - deliveryFeeFormatted
+                  - totalAmountMinor
+                  - totalAmountFormatted
+                  - deliveryAddressText
+                  - items
+                  - createdAt
+                additionalProperties: false
+  /api/v1/orders/:
+    get:
+      tags:
+        - Orders
+      description: List orders for authenticated customer or restaurant staff
+      parameters:
+        - schema:
+            type: string
+            enum:
+              - PENDING_PAYMENT
+              - PENDING
+              - CONFIRMED
+              - PREPARING
+              - READY
+              - ASSIGNED
+              - OUT_FOR_DELIVERY
+              - DELIVERED
+              - REJECTED
+              - CANCELLED
+          in: query
+          name: status
+          required: false
+        - schema:
+            type: string
+            format: uuid
+            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+          in: query
+          name: restaurantId
+          required: false
+        - schema:
+            default: 1
+            type: integer
+            exclusiveMinimum: 0
+            maximum: 9007199254740991
+          in: query
+          name: page
+          required: false
+        - schema:
+            default: 20
+            type: integer
+            exclusiveMinimum: 0
+            maximum: 50
+          in: query
+          name: limit
+          required: false
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                      format: uuid
+                      pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                    orderNumber:
+                      type: string
+                    restaurantId:
+                      type: string
+                      format: uuid
+                      pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                    restaurantName:
+                      type: string
+                    customerId:
+                      type: string
+                      format: uuid
+                      pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                    status:
+                      type: string
+                    subtotalMinor:
+                      type: integer
+                      minimum: -9007199254740991
+                      maximum: 9007199254740991
+                    subtotalFormatted:
+                      type: string
+                    deliveryFeeMinor:
+                      type: integer
+                      minimum: -9007199254740991
+                      maximum: 9007199254740991
+                    deliveryFeeFormatted:
+                      type: string
+                    totalAmountMinor:
+                      type: integer
+                      minimum: -9007199254740991
+                      maximum: 9007199254740991
+                    totalAmountFormatted:
+                      type: string
+                    deliveryAddressText:
+                      type: string
+                    deliveryDistanceKm:
+                      type:
+                        - number
+                        - "null"
+                    items:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                            format: uuid
+                            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                          itemName:
+                            type: string
+                          unitPriceMinor:
+                            type: integer
+                            minimum: -9007199254740991
+                            maximum: 9007199254740991
+                          unitPriceFormatted:
+                            type: string
+                          quantity:
+                            type: integer
+                            minimum: -9007199254740991
+                            maximum: 9007199254740991
+                          lineTotalMinor:
+                            type: integer
+                            minimum: -9007199254740991
+                            maximum: 9007199254740991
+                          lineTotalFormatted:
+                            type: string
+                        required:
+                          - id
+                          - itemName
+                          - unitPriceMinor
+                          - unitPriceFormatted
+                          - quantity
+                          - lineTotalMinor
+                          - lineTotalFormatted
+                        additionalProperties: false
+                    statusHistory:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                            format: uuid
+                            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                          fromStatus:
+                            type:
+                              - string
+                              - "null"
+                          toStatus:
+                            type: string
+                          reason:
+                            type:
+                              - string
+                              - "null"
+                          createdAt:
+                            type: string
+                        required:
+                          - id
+                          - toStatus
+                          - createdAt
+                        additionalProperties: false
+                    paymentStatus:
+                      type: string
+                    rejectionReason:
+                      type:
+                        - string
+                        - "null"
+                    cancelledReason:
+                      type:
+                        - string
+                        - "null"
+                    createdAt:
+                      type: string
+                  required:
+                    - id
+                    - orderNumber
+                    - restaurantId
+                    - restaurantName
+                    - customerId
+                    - status
+                    - subtotalMinor
+                    - subtotalFormatted
+                    - deliveryFeeMinor
+                    - deliveryFeeFormatted
+                    - totalAmountMinor
+                    - totalAmountFormatted
+                    - deliveryAddressText
+                    - items
+                    - createdAt
+                  additionalProperties: false
+  /api/v1/orders/{id}:
+    get:
+      tags:
+        - Orders
+      description: Get complete details and status history of an order
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+          in: path
+          name: id
+          required: true
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  orderNumber:
+                    type: string
+                  restaurantId:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  restaurantName:
+                    type: string
+                  customerId:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  status:
+                    type: string
+                  subtotalMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  subtotalFormatted:
+                    type: string
+                  deliveryFeeMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  deliveryFeeFormatted:
+                    type: string
+                  totalAmountMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  totalAmountFormatted:
+                    type: string
+                  deliveryAddressText:
+                    type: string
+                  deliveryDistanceKm:
+                    type:
+                      - number
+                      - "null"
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        itemName:
+                          type: string
+                        unitPriceMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        unitPriceFormatted:
+                          type: string
+                        quantity:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        lineTotalMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        lineTotalFormatted:
+                          type: string
+                      required:
+                        - id
+                        - itemName
+                        - unitPriceMinor
+                        - unitPriceFormatted
+                        - quantity
+                        - lineTotalMinor
+                        - lineTotalFormatted
+                      additionalProperties: false
+                  statusHistory:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        fromStatus:
+                          type:
+                            - string
+                            - "null"
+                        toStatus:
+                          type: string
+                        reason:
+                          type:
+                            - string
+                            - "null"
+                        createdAt:
+                          type: string
+                      required:
+                        - id
+                        - toStatus
+                        - createdAt
+                      additionalProperties: false
+                  paymentStatus:
+                    type: string
+                  rejectionReason:
+                    type:
+                      - string
+                      - "null"
+                  cancelledReason:
+                    type:
+                      - string
+                      - "null"
+                  createdAt:
+                    type: string
+                required:
+                  - id
+                  - orderNumber
+                  - restaurantId
+                  - restaurantName
+                  - customerId
+                  - status
+                  - subtotalMinor
+                  - subtotalFormatted
+                  - deliveryFeeMinor
+                  - deliveryFeeFormatted
+                  - totalAmountMinor
+                  - totalAmountFormatted
+                  - deliveryAddressText
+                  - items
+                  - createdAt
+                additionalProperties: false
+  /api/v1/orders/{id}/cancel:
+    post:
+      tags:
+        - Orders
+      description: Customer or Admin cancel order (before preparation)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 255
+              required:
+                - reason
+              additionalProperties: false
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+          in: path
+          name: id
+          required: true
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  orderNumber:
+                    type: string
+                  restaurantId:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  restaurantName:
+                    type: string
+                  customerId:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  status:
+                    type: string
+                  subtotalMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  subtotalFormatted:
+                    type: string
+                  deliveryFeeMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  deliveryFeeFormatted:
+                    type: string
+                  totalAmountMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  totalAmountFormatted:
+                    type: string
+                  deliveryAddressText:
+                    type: string
+                  deliveryDistanceKm:
+                    type:
+                      - number
+                      - "null"
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        itemName:
+                          type: string
+                        unitPriceMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        unitPriceFormatted:
+                          type: string
+                        quantity:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        lineTotalMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        lineTotalFormatted:
+                          type: string
+                      required:
+                        - id
+                        - itemName
+                        - unitPriceMinor
+                        - unitPriceFormatted
+                        - quantity
+                        - lineTotalMinor
+                        - lineTotalFormatted
+                      additionalProperties: false
+                  statusHistory:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        fromStatus:
+                          type:
+                            - string
+                            - "null"
+                        toStatus:
+                          type: string
+                        reason:
+                          type:
+                            - string
+                            - "null"
+                        createdAt:
+                          type: string
+                      required:
+                        - id
+                        - toStatus
+                        - createdAt
+                      additionalProperties: false
+                  paymentStatus:
+                    type: string
+                  rejectionReason:
+                    type:
+                      - string
+                      - "null"
+                  cancelledReason:
+                    type:
+                      - string
+                      - "null"
+                  createdAt:
+                    type: string
+                required:
+                  - id
+                  - orderNumber
+                  - restaurantId
+                  - restaurantName
+                  - customerId
+                  - status
+                  - subtotalMinor
+                  - subtotalFormatted
+                  - deliveryFeeMinor
+                  - deliveryFeeFormatted
+                  - totalAmountMinor
+                  - totalAmountFormatted
+                  - deliveryAddressText
+                  - items
+                  - createdAt
+                additionalProperties: false
+  /api/v1/orders/{id}/accept:
+    post:
+      tags:
+        - Orders
+      description: Restaurant accepts order and begins preparation
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+          in: path
+          name: id
+          required: true
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  orderNumber:
+                    type: string
+                  restaurantId:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  restaurantName:
+                    type: string
+                  customerId:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  status:
+                    type: string
+                  subtotalMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  subtotalFormatted:
+                    type: string
+                  deliveryFeeMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  deliveryFeeFormatted:
+                    type: string
+                  totalAmountMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  totalAmountFormatted:
+                    type: string
+                  deliveryAddressText:
+                    type: string
+                  deliveryDistanceKm:
+                    type:
+                      - number
+                      - "null"
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        itemName:
+                          type: string
+                        unitPriceMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        unitPriceFormatted:
+                          type: string
+                        quantity:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        lineTotalMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        lineTotalFormatted:
+                          type: string
+                      required:
+                        - id
+                        - itemName
+                        - unitPriceMinor
+                        - unitPriceFormatted
+                        - quantity
+                        - lineTotalMinor
+                        - lineTotalFormatted
+                      additionalProperties: false
+                  statusHistory:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        fromStatus:
+                          type:
+                            - string
+                            - "null"
+                        toStatus:
+                          type: string
+                        reason:
+                          type:
+                            - string
+                            - "null"
+                        createdAt:
+                          type: string
+                      required:
+                        - id
+                        - toStatus
+                        - createdAt
+                      additionalProperties: false
+                  paymentStatus:
+                    type: string
+                  rejectionReason:
+                    type:
+                      - string
+                      - "null"
+                  cancelledReason:
+                    type:
+                      - string
+                      - "null"
+                  createdAt:
+                    type: string
+                required:
+                  - id
+                  - orderNumber
+                  - restaurantId
+                  - restaurantName
+                  - customerId
+                  - status
+                  - subtotalMinor
+                  - subtotalFormatted
+                  - deliveryFeeMinor
+                  - deliveryFeeFormatted
+                  - totalAmountMinor
+                  - totalAmountFormatted
+                  - deliveryAddressText
+                  - items
+                  - createdAt
+                additionalProperties: false
+  /api/v1/orders/{id}/ready:
+    post:
+      tags:
+        - Orders
+      description: Restaurant marks order as ready for pickup
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+          in: path
+          name: id
+          required: true
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  orderNumber:
+                    type: string
+                  restaurantId:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  restaurantName:
+                    type: string
+                  customerId:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  status:
+                    type: string
+                  subtotalMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  subtotalFormatted:
+                    type: string
+                  deliveryFeeMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  deliveryFeeFormatted:
+                    type: string
+                  totalAmountMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  totalAmountFormatted:
+                    type: string
+                  deliveryAddressText:
+                    type: string
+                  deliveryDistanceKm:
+                    type:
+                      - number
+                      - "null"
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        itemName:
+                          type: string
+                        unitPriceMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        unitPriceFormatted:
+                          type: string
+                        quantity:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        lineTotalMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        lineTotalFormatted:
+                          type: string
+                      required:
+                        - id
+                        - itemName
+                        - unitPriceMinor
+                        - unitPriceFormatted
+                        - quantity
+                        - lineTotalMinor
+                        - lineTotalFormatted
+                      additionalProperties: false
+                  statusHistory:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        fromStatus:
+                          type:
+                            - string
+                            - "null"
+                        toStatus:
+                          type: string
+                        reason:
+                          type:
+                            - string
+                            - "null"
+                        createdAt:
+                          type: string
+                      required:
+                        - id
+                        - toStatus
+                        - createdAt
+                      additionalProperties: false
+                  paymentStatus:
+                    type: string
+                  rejectionReason:
+                    type:
+                      - string
+                      - "null"
+                  cancelledReason:
+                    type:
+                      - string
+                      - "null"
+                  createdAt:
+                    type: string
+                required:
+                  - id
+                  - orderNumber
+                  - restaurantId
+                  - restaurantName
+                  - customerId
+                  - status
+                  - subtotalMinor
+                  - subtotalFormatted
+                  - deliveryFeeMinor
+                  - deliveryFeeFormatted
+                  - totalAmountMinor
+                  - totalAmountFormatted
+                  - deliveryAddressText
+                  - items
+                  - createdAt
+                additionalProperties: false
+  /api/v1/orders/{id}/reject:
+    post:
+      tags:
+        - Orders
+      description: Restaurant rejects incoming order with reason
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 255
+                note:
+                  type: string
+                  maxLength: 255
+              required:
+                - reason
+              additionalProperties: false
+      parameters:
+        - schema:
+            type: string
+            format: uuid
+            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+          in: path
+          name: id
+          required: true
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  orderNumber:
+                    type: string
+                  restaurantId:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  restaurantName:
+                    type: string
+                  customerId:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  status:
+                    type: string
+                  subtotalMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  subtotalFormatted:
+                    type: string
+                  deliveryFeeMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  deliveryFeeFormatted:
+                    type: string
+                  totalAmountMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  totalAmountFormatted:
+                    type: string
+                  deliveryAddressText:
+                    type: string
+                  deliveryDistanceKm:
+                    type:
+                      - number
+                      - "null"
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        itemName:
+                          type: string
+                        unitPriceMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        unitPriceFormatted:
+                          type: string
+                        quantity:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        lineTotalMinor:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        lineTotalFormatted:
+                          type: string
+                      required:
+                        - id
+                        - itemName
+                        - unitPriceMinor
+                        - unitPriceFormatted
+                        - quantity
+                        - lineTotalMinor
+                        - lineTotalFormatted
+                      additionalProperties: false
+                  statusHistory:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                        fromStatus:
+                          type:
+                            - string
+                            - "null"
+                        toStatus:
+                          type: string
+                        reason:
+                          type:
+                            - string
+                            - "null"
+                        createdAt:
+                          type: string
+                      required:
+                        - id
+                        - toStatus
+                        - createdAt
+                      additionalProperties: false
+                  paymentStatus:
+                    type: string
+                  rejectionReason:
+                    type:
+                      - string
+                      - "null"
+                  cancelledReason:
+                    type:
+                      - string
+                      - "null"
+                  createdAt:
+                    type: string
+                required:
+                  - id
+                  - orderNumber
+                  - restaurantId
+                  - restaurantName
+                  - customerId
+                  - status
+                  - subtotalMinor
+                  - subtotalFormatted
+                  - deliveryFeeMinor
+                  - deliveryFeeFormatted
+                  - totalAmountMinor
+                  - totalAmountFormatted
+                  - deliveryAddressText
+                  - items
+                  - createdAt
+                additionalProperties: false
+  /api/v1/payments/webhook:
+    post:
+      tags:
+        - Payments
+      description: Paystack webhook receiver (HMAC SHA-512 signature verified)
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received:
+                    type: boolean
+                required:
+                  - received
+                additionalProperties: false
+  /api/v1/payments/initialize:
+    post:
+      tags:
+        - Payments
+      description: Initialize Paystack checkout transaction for an order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                orderId:
+                  type: string
+                  format: uuid
+                  pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                callbackUrl:
+                  type: string
+                  format: uri
+              required:
+                - orderId
+              additionalProperties: false
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  authorizationUrl:
+                    type: string
+                  accessCode:
+                    type: string
+                  reference:
+                    type: string
+                  orderId:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  amountMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  amountFormatted:
+                    type: string
+                required:
+                  - authorizationUrl
+                  - accessCode
+                  - reference
+                  - orderId
+                  - amountMinor
+                  - amountFormatted
+                additionalProperties: false
+  /api/v1/payments/verify/{reference}:
+    get:
+      tags:
+        - Payments
+      description: Verify payment transaction status with Paystack
+      parameters:
+        - schema:
+            type: string
+            minLength: 1
+          in: path
+          name: reference
+          required: true
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orderId:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  reference:
+                    type: string
+                  status:
+                    type: string
+                    enum:
+                      - PENDING
+                      - SUCCESS
+                      - FAILED
+                      - ABANDONED
+                  paidAt:
+                    type:
+                      - string
+                      - "null"
+                  amountMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                required:
+                  - orderId
+                  - reference
+                  - status
+                  - amountMinor
+                additionalProperties: false
+  /api/v1/riders/status:
+    patch:
+      tags:
+        - Delivery
+      description: Toggle rider online/offline availability status
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/riders/deliveries/available:
+    get:
+      tags:
+        - Delivery
+      description: List available delivery assignments for riders
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/riders/deliveries/{deliveryId}/accept:
+    post:
+      tags:
+        - Delivery
+      description: Rider accepts a delivery assignment
+      security:
+        - bearerAuth: []
+      parameters:
+        - schema:
+            type: string
+          in: path
+          name: deliveryId
+          required: true
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/riders/deliveries/{deliveryId}/pickup:
+    post:
+      tags:
+        - Delivery
+      description: Rider confirms food pickup from restaurant
+      security:
+        - bearerAuth: []
+      parameters:
+        - schema:
+            type: string
+          in: path
+          name: deliveryId
+          required: true
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/riders/deliveries/{deliveryId}/complete:
+    post:
+      tags:
+        - Delivery
+      description: Rider confirms successful delivery to customer
+      security:
+        - bearerAuth: []
+      parameters:
+        - schema:
+            type: string
+          in: path
+          name: deliveryId
+          required: true
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/deliveries/{orderId}/track:
+    get:
+      tags:
+        - Delivery
+      description: Track live delivery status, locations, and rider details
+      security:
+        - bearerAuth: []
+      parameters:
+        - schema:
+            type: string
+          in: path
+          name: orderId
+          required: true
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/notifications/:
+    get:
+      tags:
+        - Notifications
+      description: List notifications for authenticated user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/notifications/{id}/read:
+    patch:
+      tags:
+        - Notifications
+      description: Mark a notification as read
+      security:
+        - bearerAuth: []
+      parameters:
+        - schema:
+            type: string
+          in: path
+          name: id
+          required: true
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/notifications/read-all:
+    patch:
+      tags:
+        - Notifications
+      description: Mark all notifications as read for authenticated user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/pricing/estimate:
+    post:
+      tags:
+        - Pricing
+      description: Calculate authoritative order estimate including distance delivery
+        and platform fees
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                restaurantId:
+                  type: string
+                  format: uuid
+                  pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                addressId:
+                  type: string
+                  format: uuid
+                  pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                latitude:
+                  type: number
+                  minimum: -90
+                  maximum: 90
+                longitude:
+                  type: number
+                  minimum: -180
+                  maximum: 180
+                items:
+                  minItems: 1
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      menuItemId:
+                        type: string
+                        format: uuid
+                        pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                      quantity:
+                        type: integer
+                        exclusiveMinimum: 0
+                        maximum: 50
+                    required:
+                      - menuItemId
+                      - quantity
+              required:
+                - restaurantId
+                - items
+              additionalProperties: false
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subtotalMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  subtotalFormatted:
+                    type: string
+                  deliveryFeeMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  deliveryFeeFormatted:
+                    type: string
+                  platformFeeMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  platformFeeFormatted:
+                    type: string
+                  totalMinor:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  totalFormatted:
+                    type: string
+                  distanceKm:
+                    type:
+                      - number
+                      - "null"
+                required:
+                  - subtotalMinor
+                  - subtotalFormatted
+                  - deliveryFeeMinor
+                  - deliveryFeeFormatted
+                  - platformFeeMinor
+                  - platformFeeFormatted
+                  - totalMinor
+                  - totalFormatted
+                additionalProperties: false
+  /api/v1/pricing/configs:
+    get:
+      tags:
+        - Pricing
+      description: Get active platform commission and delivery pricing tiers
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/admin/metrics:
+    get:
+      tags:
+        - Admin
+      description: Get high-level platform health and business metrics (Admin only)
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/admin/restaurants/{id}/status:
+    patch:
+      tags:
+        - Admin
+      description: Approve, suspend, or reject a restaurant (Admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - schema:
+            type: string
+          in: path
+          name: id
+          required: true
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/admin/riders/{id}/status:
+    patch:
+      tags:
+        - Admin
+      description: Approve or suspend a rider profile (Admin only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - schema:
+            type: string
+          in: path
+          name: id
+          required: true
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/admin/audit-logs:
+    get:
+      tags:
+        - Admin
+      description: Query system audit logs with filters and pagination (Admin only)
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/favorites/:
+    get:
+      tags:
+        - Favorites
+      description: List authenticated customer favorite menu items
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+  /api/v1/favorites/{menuItemId}:
+    post:
+      tags:
+        - Favorites
+      description: Toggle favorite status for a menu item
+      security:
+        - bearerAuth: []
+      parameters:
+        - schema:
+            type: string
+          in: path
+          name: menuItemId
+          required: true
+      responses:
+        "200":
+          description: Default Response
+servers:
+  - url: http://localhost:4000
+    description: Local development server
+security:
+  - bearerAuth: []

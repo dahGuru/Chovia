@@ -1,0 +1,11 @@
+{
+  "name": "@chovia/config",
+  "version": "0.0.1",
+  "private": true,
+  "files": [
+    "tsconfig"
+  ],
+  "scripts": {
+    "clean": "node -e \"const fs=require('fs'); ['.turbo'].forEach(p=>{if(fs.existsSync(p))fs.rmSync(p,{recursive:true,force:true})})\""
+  }
+}
