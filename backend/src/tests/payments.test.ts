@@ -5,7 +5,7 @@ import { PaystackService, paystackService } from "../integrations/paystack/payst
 import { paymentsService } from "../modules/payments/payments.service.js";
 import { prisma } from "../database/prisma.js";
 import { outboxDispatcher } from "../jobs/outbox/outbox.dispatcher.js";
-import { BadRequestError, ForbiddenError, NotFoundError } from "../common/errors/api-error.js";
+import { BadRequestError, ForbiddenError, NotFoundError, PaymentGatewayError } from "../common/errors/api-error.js";
 
 describe("Paystack Payment Integration & Webhook Security", () => {
   const secretKey = "sk_test_mock_paystack_secret_key_123456";
@@ -148,7 +148,7 @@ describe("Paystack Payment Integration & Webhook Security", () => {
     try {
       await expect(
         customPaystack.verifyTransaction("CHV-PAY-NO-CURRENCY", 500000)
-      ).rejects.toThrow(BadRequestError);
+      ).rejects.toThrow(PaymentGatewayError);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -180,7 +180,7 @@ describe("Paystack Payment Integration & Webhook Security", () => {
     try {
       await expect(
         customPaystack.verifyTransaction("CHV-PAY-USD", 500000)
-      ).rejects.toThrow(BadRequestError);
+      ).rejects.toThrow(PaymentGatewayError);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -244,7 +244,7 @@ describe("Paystack Payment Integration & Webhook Security", () => {
     try {
       await expect(
         customPaystack.verifyTransaction("CHV-PAY-NO-ID", 500000)
-      ).rejects.toThrow(BadRequestError);
+      ).rejects.toThrow(PaymentGatewayError);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -433,7 +433,7 @@ describe("PaymentsService Workflow & State Machine", () => {
       order: {
         id: "ord_1",
         customer: { userId: "usr_legitimate_customer" },
-        refund: null,
+        refunds: [],
       },
     } as any);
 
@@ -460,7 +460,7 @@ describe("PaymentsService Workflow & State Machine", () => {
         status: "CANCELLED",
         orderNumber: "CHV-ORD-8888",
         customer: { userId: "usr_cust_1" },
-        refund: null,
+        refunds: [],
       },
     };
 
@@ -555,7 +555,7 @@ describe("PaymentsService Workflow & State Machine", () => {
         status: "CONFIRMED",
         orderNumber: "CHV-ORD-7777",
         customer: { userId: "usr_cust_2" },
-        refund: { status: "REFUNDED", id: "ref_1" },
+        refunds: [{ status: "REFUNDED", id: "ref_1" }],
       },
     };
 
@@ -633,7 +633,7 @@ describe("PaymentsService Workflow & State Machine", () => {
         orderNumber: "CHV-ORD-5555",
         customer: { userId: "usr_cust_3" },
         restaurantId: "rest_1",
-        refund: null,
+        refunds: [],
       },
     };
 
@@ -720,44 +720,66 @@ describe("PaymentsService Workflow & State Machine", () => {
 
   it("should validate refund prerequisites (unpaid order, existing refund, excessive amount)", async () => {
     // 1. Order not found
-    const findOrderNullSpy = vi.spyOn(prisma.order, "findUnique").mockResolvedValueOnce(null);
+    const txSpy1 = vi.spyOn(prisma, "$transaction").mockImplementationOnce(async (cb: any) => {
+      return cb({
+        order: { findUnique: vi.fn().mockResolvedValue(null) },
+      });
+    });
     await expect(
       paymentsService.requestRefund("admin_1", "non_existent_order")
     ).rejects.toThrow(NotFoundError);
-    findOrderNullSpy.mockRestore();
+    txSpy1.mockRestore();
 
     // 2. Order not successfully paid
-    const findOrderUnpaidSpy = vi.spyOn(prisma.order, "findUnique").mockResolvedValueOnce({
-      id: "ord_unpaid",
-      payment: { status: "PENDING" },
-      refund: null,
-    } as any);
+    const txSpy2 = vi.spyOn(prisma, "$transaction").mockImplementationOnce(async (cb: any) => {
+      return cb({
+        order: {
+          findUnique: vi.fn().mockResolvedValue({
+            id: "ord_unpaid",
+            payment: { status: "PENDING" },
+            refunds: [],
+          }),
+        },
+      });
+    });
     await expect(
       paymentsService.requestRefund("admin_1", "ord_unpaid")
     ).rejects.toThrow(BadRequestError);
-    findOrderUnpaidSpy.mockRestore();
+    txSpy2.mockRestore();
 
-    // 3. Order already refunded
-    const findOrderRefundedSpy = vi.spyOn(prisma.order, "findUnique").mockResolvedValueOnce({
-      id: "ord_already_refunded",
-      payment: { status: "SUCCESS", amount: "50.00" },
-      refund: { status: "REFUNDED" },
-    } as any);
+    // 3. Order already fully refunded
+    const txSpy3 = vi.spyOn(prisma, "$transaction").mockImplementationOnce(async (cb: any) => {
+      return cb({
+        order: {
+          findUnique: vi.fn().mockResolvedValue({
+            id: "ord_already_refunded",
+            payment: { status: "SUCCESS", amount: "50.00" },
+            refunds: [{ status: "REFUNDED", amount: "50.00" }],
+          }),
+        },
+      });
+    });
     await expect(
       paymentsService.requestRefund("admin_1", "ord_already_refunded")
     ).rejects.toThrow(/already been fully refunded/i);
-    findOrderRefundedSpy.mockRestore();
+    txSpy3.mockRestore();
 
-    // 4. Refund amount exceeds payment amount
-    const findOrderExcessSpy = vi.spyOn(prisma.order, "findUnique").mockResolvedValueOnce({
-      id: "ord_excess",
-      payment: { status: "SUCCESS", amount: "50.00" }, // 5000 kobo
-      refund: null,
-    } as any);
+    // 4. Refund amount exceeds remaining refundable amount
+    const txSpy4 = vi.spyOn(prisma, "$transaction").mockImplementationOnce(async (cb: any) => {
+      return cb({
+        order: {
+          findUnique: vi.fn().mockResolvedValue({
+            id: "ord_excess",
+            payment: { status: "SUCCESS", amount: "50.00" }, // 5000 kobo
+            refunds: [],
+          }),
+        },
+      });
+    });
     await expect(
       paymentsService.requestRefund("admin_1", "ord_excess", 6000) // 6000 > 5000
-    ).rejects.toThrow(/cannot exceed original payment amount/i);
-    findOrderExcessSpy.mockRestore();
+    ).rejects.toThrow(/cannot exceed remaining refundable amount/i);
+    txSpy4.mockRestore();
   });
 
   it("should process refund request, call Paystack refund API, and create audit log", async () => {
@@ -770,10 +792,8 @@ describe("PaymentsService Workflow & State Machine", () => {
         providerReference: "CHV-PAY-REFUNDABLE",
         providerTransactionId: "paystack_tx_555",
       },
-      refund: null,
+      refunds: [],
     };
-
-    const findOrderSpy = vi.spyOn(prisma.order, "findUnique").mockResolvedValueOnce(validOrder as any);
 
     const mockCreatedRefund = {
       id: "ref_created_1",
@@ -786,11 +806,12 @@ describe("PaymentsService Workflow & State Machine", () => {
       completedAt: null,
     };
 
-    const txRefundUpsertSpy = vi.fn().mockResolvedValue(mockCreatedRefund);
+    const txRefundCreateSpy = vi.fn().mockResolvedValue(mockCreatedRefund);
     const txAuditLogCreateSpy = vi.fn().mockResolvedValue({});
 
     const mockTx = {
-      refund: { upsert: txRefundUpsertSpy },
+      order: { findUnique: vi.fn().mockResolvedValue(validOrder) },
+      refund: { create: txRefundCreateSpy },
       auditLog: { create: txAuditLogCreateSpy },
     };
 
@@ -801,15 +822,23 @@ describe("PaymentsService Workflow & State Machine", () => {
     const createRefundSpy = vi.spyOn(paystackService, "createRefund").mockResolvedValueOnce({
       status: "processed",
       refundId: 887766,
+      reference: "CHV-PAY-REFUNDABLE",
       amountMinor: 10000,
       currency: "NGN",
+      refundedAt: new Date(),
     });
 
     const refundUpdateSpy = vi.spyOn(prisma.refund, "update").mockResolvedValueOnce({
       ...mockCreatedRefund,
       status: "REFUNDED",
+      providerRefundId: "887766",
       completedAt: new Date(),
     } as any);
+
+    const findManyRefundsSpy = vi.spyOn(prisma.refund, "findMany").mockResolvedValueOnce([
+      { id: "ref_created_1", orderId: "ord_to_refund", amount: "100.00", status: "REFUNDED" },
+    ] as any);
+    const orderUpdateSpy = vi.spyOn(prisma.order, "update").mockResolvedValueOnce({} as any);
 
     try {
       const result = await paymentsService.requestRefund(
@@ -820,6 +849,7 @@ describe("PaymentsService Workflow & State Machine", () => {
       );
 
       expect(result.status).toBe("REFUNDED");
+      expect(result.providerRefundId).toBe("887766");
       expect(createRefundSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           transactionReferenceOrId: "CHV-PAY-REFUNDABLE",
@@ -829,13 +859,114 @@ describe("PaymentsService Workflow & State Machine", () => {
       expect(refundUpdateSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: "ref_created_1" },
-          data: expect.objectContaining({ status: "REFUNDED" }),
+          data: expect.objectContaining({ status: "REFUNDED", providerRefundId: "887766" }),
         })
       );
       expect(txAuditLogCreateSpy).toHaveBeenCalled();
     } finally {
-      findOrderSpy.mockRestore();
       txSpy.mockRestore();
+      createRefundSpy.mockRestore();
+      refundUpdateSpy.mockRestore();
+      findManyRefundsSpy.mockRestore();
+      orderUpdateSpy.mockRestore();
+    }
+  });
+
+  it("should support multiple partial refunds and enforce cumulative limits with reservation", async () => {
+    // Scenario: Order total = 10,000 kobo (100.00 NGN)
+    // 1st refund = 4,000 kobo (already completed)
+    // 2nd refund requested = 7,000 kobo -> exceeds remaining 6,000 kobo -> should fail
+    // 2nd refund requested = 3,000 kobo -> should succeed (leaves 3,000 kobo)
+    const orderWithPartialRefund = {
+      id: "ord_partial",
+      payment: {
+        id: "pay_partial",
+        status: "SUCCESS",
+        amount: "100.00", // 10,000 kobo
+        providerReference: "CHV-PAY-PARTIAL",
+      },
+      refunds: [
+        {
+          id: "ref_part_1",
+          orderId: "ord_partial",
+          amount: "40.00", // 4,000 kobo
+          status: "REFUNDED",
+        },
+      ],
+    };
+
+    // Attempt refund of 7,000 kobo (4,000 + 7,000 = 11,000 > 10,000)
+    const txSpy1 = vi.spyOn(prisma, "$transaction").mockImplementationOnce(async (cb: any) => {
+      return cb({
+        order: { findUnique: vi.fn().mockResolvedValue(orderWithPartialRefund) },
+      });
+    });
+
+    await expect(
+      paymentsService.requestRefund("admin_1", "ord_partial", 7000, "Too much")
+    ).rejects.toThrow(/cannot exceed remaining refundable amount/i);
+    txSpy1.mockRestore();
+
+    // Now attempt valid 2nd partial refund of 3,000 kobo
+    const secondRefundRecord = {
+      id: "ref_part_2",
+      orderId: "ord_partial",
+      amount: "30.00",
+      currency: "NGN",
+      status: "REFUND_PENDING",
+      reason: "Second partial refund",
+      requestedAt: new Date(),
+      completedAt: null,
+    };
+
+    const mockTx = {
+      order: { findUnique: vi.fn().mockResolvedValue(orderWithPartialRefund) },
+      refund: { create: vi.fn().mockResolvedValue(secondRefundRecord) },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+    };
+
+    const txSpy2 = vi.spyOn(prisma, "$transaction").mockImplementationOnce(async (cb: any) => {
+      return cb(mockTx);
+    });
+
+    const createRefundSpy = vi.spyOn(paystackService, "createRefund").mockResolvedValueOnce({
+      status: "pending",
+      refundId: 554433,
+      reference: "CHV-PAY-PARTIAL",
+      amountMinor: 3000,
+      currency: "NGN",
+    });
+
+    const refundUpdateSpy = vi.spyOn(prisma.refund, "update").mockResolvedValueOnce({
+      ...secondRefundRecord,
+      status: "PROCESSING",
+      providerRefundId: "554433",
+      processedAt: new Date(),
+    } as any);
+
+    try {
+      const result = await paymentsService.requestRefund(
+        "admin_1",
+        "ord_partial",
+        3000,
+        "Second partial refund"
+      );
+
+      // Verify Paystack pending state mapped to PROCESSING
+      expect(result.status).toBe("PROCESSING");
+      expect(result.amountMinor).toBe(3000);
+      expect(result.providerRefundId).toBe("554433");
+      expect(refundUpdateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "ref_part_2" },
+          data: expect.objectContaining({
+            status: "PROCESSING",
+            providerRefundId: "554433",
+          }),
+        })
+      );
+    } finally {
+      txSpy2.mockRestore();
       createRefundSpy.mockRestore();
       refundUpdateSpy.mockRestore();
     }
@@ -869,7 +1000,7 @@ describe("PaymentsService Workflow & State Machine", () => {
           orderNumber: "ORD-WH-1",
           customer: { userId: "usr_cust_wh" },
           restaurantId: "rest_wh",
-          refund: null,
+          refunds: [],
         }),
         update: vi.fn().mockResolvedValue({}),
       },
@@ -901,17 +1032,37 @@ describe("PaymentsService Workflow & State Machine", () => {
     findPaymentSpy.mockRestore();
     txSpy.mockRestore();
 
-    // 3. refund.processed webhook event
+    // 3. refund.processed webhook event matching providerRefundId
     const findRefundSpy = vi.spyOn(prisma.refund, "findFirst").mockResolvedValueOnce({
       id: "ref_wh_1",
-      status: "REFUND_PENDING",
+      orderId: "ord_wh_1",
+      status: "PROCESSING",
+      amount: "50.00",
+      order: {
+        payment: { amount: "50.00" },
+      },
     } as any);
-    const refundUpdateSpy = vi.spyOn(prisma.refund, "update").mockResolvedValueOnce({} as any);
-    const auditLogCreateSpy = vi.spyOn(prisma.auditLog, "create").mockResolvedValueOnce({} as any);
+
+    const mockRefundTx = {
+      refund: {
+        update: vi.fn().mockResolvedValue({}),
+        findMany: vi.fn().mockResolvedValue([
+          { id: "ref_wh_1", orderId: "ord_wh_1", amount: "50.00", status: "REFUNDED" },
+        ]),
+      },
+      auditLog: { create: vi.fn().mockResolvedValue({}) },
+      order: { update: vi.fn().mockResolvedValue({}) },
+      orderStatusHistory: { create: vi.fn().mockResolvedValue({}) },
+    };
+
+    const refundTxSpy = vi.spyOn(prisma, "$transaction").mockImplementationOnce(async (cb: any) => {
+      return cb(mockRefundTx);
+    });
 
     const refundProcessedPayload = JSON.stringify({
       event: "refund.processed",
       data: {
+        id: 998877,
         reference: "CHV-REF-WH-1",
         status: "processed",
         amount: 5000,
@@ -920,16 +1071,29 @@ describe("PaymentsService Workflow & State Machine", () => {
 
     const refundWhResult = await paymentsService.handleWebhook(refundProcessedPayload, "valid_mock_sig");
     expect(refundWhResult.received).toBe(true);
-    expect(refundUpdateSpy).toHaveBeenCalledWith(
+    expect(mockRefundTx.refund.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "ref_wh_1" },
-        data: expect.objectContaining({ status: "REFUNDED" }),
+        data: expect.objectContaining({ status: "REFUNDED", providerRefundId: "998877" }),
       })
     );
 
     findRefundSpy.mockRestore();
-    refundUpdateSpy.mockRestore();
-    auditLogCreateSpy.mockRestore();
+    refundTxSpy.mockRestore();
+
+    // 4. Idempotent repeat of refund.processed when already REFUNDED
+    const findRefundAlreadyDoneSpy = vi.spyOn(prisma.refund, "findFirst").mockResolvedValueOnce({
+      id: "ref_wh_1",
+      orderId: "ord_wh_1",
+      status: "REFUNDED", // Already terminal
+      amount: "50.00",
+      order: { payment: { amount: "50.00" } },
+    } as any);
+
+    const repeatResult = await paymentsService.handleWebhook(refundProcessedPayload, "valid_mock_sig");
+    expect(repeatResult.received).toBe(true);
+    findRefundAlreadyDoneSpy.mockRestore();
+
     vi.restoreAllMocks();
   });
 });

@@ -112,7 +112,7 @@ export class DeliveryService {
     }
 
     const updated = await prisma.$transaction(async (tx) => {
-      // 1. Assign delivery to rider
+      // 1. Assign delivery to rider and mark rider unavailable
       const d = await tx.delivery.update({
         where: { id: deliveryId },
         data: {
@@ -125,6 +125,11 @@ export class DeliveryService {
             include: { restaurant: true },
           },
         },
+      });
+
+      await tx.riderProfile.update({
+        where: { id: rider.id },
+        data: { isAvailable: false },
       });
 
       // 2. Create Assignment Event
@@ -253,6 +258,12 @@ export class DeliveryService {
       await tx.order.update({
         where: { id: delivery.orderId },
         data: { status: "DELIVERED" },
+      });
+
+      // Restore rider availability
+      await tx.riderProfile.update({
+        where: { id: rider.id },
+        data: { isAvailable: true },
       });
 
       return d;

@@ -54,7 +54,8 @@ export class GoogleMapsService {
       this.isMock = false;
     } else {
       this.isMock =
-        env.MOCK_INTEGRATIONS ||
+        Boolean(env.MOCK_INTEGRATIONS) ||
+        env.NODE_ENV === "test" ||
         !this.apiKey ||
         this.apiKey.startsWith("mock_") ||
         this.apiKey.includes("Placeholder");

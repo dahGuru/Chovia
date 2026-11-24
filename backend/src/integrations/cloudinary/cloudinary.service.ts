@@ -1,6 +1,6 @@
 import { v2 as cloudinary, type UploadApiOptions } from "cloudinary";
 import { env } from "../../config/env.js";
-import { BadRequestError } from "../../common/errors/api-error.js";
+import { BadRequestError, NotFoundError, PaymentGatewayError } from "../../common/errors/api-error.js";
 
 export type AllowedFolder = "menu" | "restaurants" | "avatars" | "documents";
 
@@ -52,17 +52,17 @@ export interface UploadSignatureResult {
   allowedFormats: string[];
   maxFileSize: number;
   resourceType: string;
-  publicId?: string;
+  publicId?: string | undefined;
 }
 
 export interface CloudinaryUploadResult {
   publicId: string;
   secureUrl: string;
-  width?: number;
-  height?: number;
-  format?: string;
-  bytes?: number;
-  resourceType?: string;
+  width?: number | undefined;
+  height?: number | undefined;
+  format?: string | undefined;
+  bytes?: number | undefined;
+  resourceType?: string | undefined;
 }
 
 export function inspectFileMagicBytes(buffer: Buffer): { format: string; mimeType: string } | null {
@@ -143,7 +143,12 @@ export class CloudinaryService {
       }
       this.isMock = false;
     } else {
-      this.isMock = Boolean(env.MOCK_INTEGRATIONS) || !this.isConfigured;
+      this.isMock =
+        Boolean(env.MOCK_INTEGRATIONS) ||
+        !this.isConfigured ||
+        env.NODE_ENV === "test" ||
+        env.CLOUDINARY_API_KEY.startsWith("mock_") ||
+        env.CLOUDINARY_CLOUD_NAME.includes("mock");
     }
 
     if (this.isConfigured) {
@@ -238,6 +243,116 @@ export class CloudinaryService {
     };
   }
 
+  validateRemoteUrl(urlStr: string): void {
+    let url: URL;
+    try {
+      url = new URL(urlStr);
+    } catch {
+      throw new BadRequestError("Invalid remote image URL");
+    }
+
+    if (url.protocol !== "https:") {
+      throw new BadRequestError("Remote upload URLs must use HTTPS");
+    }
+
+    const hostname = url.hostname.toLowerCase();
+    // Protect against SSRF: block private ranges, localhost, and cloud metadata endpoints
+    if (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname === "169.254.169.254" ||
+      hostname === "metadata.google.internal" ||
+      hostname.endsWith(".internal") ||
+      hostname.endsWith(".local") ||
+      /^10\./.test(hostname) ||
+      /^192\.168\./.test(hostname) ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname)
+    ) {
+      throw new BadRequestError("Remote upload URLs targeting internal, loopback, or metadata services are forbidden");
+    }
+  }
+
+  async verifyAssetWithProvider(
+    publicId: string,
+    folder: AllowedFolder,
+    expectedUserId?: string
+  ): Promise<CloudinaryUploadResult> {
+    const policy = UPLOAD_POLICIES[folder];
+    if (!policy) {
+      throw new BadRequestError(`Invalid upload category "${folder}".`);
+    }
+
+    const expectedPrefix = `chovia/${folder}/`;
+    if (!publicId.startsWith(expectedPrefix)) {
+      throw new BadRequestError(
+        `Upload publicId "${publicId}" does not belong to expected folder "${expectedPrefix}".`
+      );
+    }
+
+    // Prevent cross-user asset claims for user-scoped resources (e.g. avatars)
+    if (folder === "avatars" && expectedUserId && !publicId.includes(expectedUserId)) {
+      throw new BadRequestError(
+        `Unauthorized asset claim: publicId "${publicId}" does not belong to authenticated user.`
+      );
+    }
+
+    if (this.isMock) {
+      const mockResult: CloudinaryUploadResult = {
+        publicId,
+        secureUrl: `https://res.cloudinary.com/chovia/${policy.resourceType}/upload/v1/${publicId}.webp`,
+        format: "webp",
+        bytes: 102400,
+        resourceType: policy.resourceType,
+        width: 800,
+        height: 600,
+      };
+      this.verifyUploadResponse(folder, mockResult);
+      return mockResult;
+    }
+
+    let resource: Record<string, unknown>;
+    try {
+      resource = (await cloudinary.api.resource(publicId, {
+        resource_type: policy.resourceType === "auto" ? "image" : policy.resourceType,
+      })) as Record<string, unknown>;
+    } catch (err: unknown) {
+      const errorObj = err as { http_code?: number; error?: { http_code?: number } };
+      const statusCode = errorObj.http_code || errorObj.error?.http_code;
+      if (statusCode === 404) {
+        throw new NotFoundError(`Asset "${publicId}" does not exist on Cloudinary.`);
+      }
+      const message = err instanceof Error ? err.message : "Cloudinary asset lookup failed";
+      throw new PaymentGatewayError(`Cloudinary asset verification error: ${message}`);
+    }
+
+    if (!resource) {
+      throw new NotFoundError(`Asset "${publicId}" was not found.`);
+    }
+
+    const actualBytes = Number(resource["bytes"]);
+    const actualFormat = typeof resource["format"] === "string" ? resource["format"].toLowerCase() : undefined;
+    const actualResourceType = typeof resource["resource_type"] === "string" ? resource["resource_type"] : undefined;
+
+    // Verify actual byte size and format from provider metadata (never trust client claims)
+    this.verifyUploadResponse(folder, {
+      publicId,
+      format: actualFormat,
+      bytes: Number.isFinite(actualBytes) ? actualBytes : undefined,
+      resourceType: actualResourceType,
+    });
+
+    return {
+      publicId: String(resource["public_id"]),
+      secureUrl: String(resource["secure_url"]),
+      format: actualFormat,
+      bytes: actualBytes,
+      resourceType: actualResourceType,
+      width: typeof resource["width"] === "number" ? resource["width"] : undefined,
+      height: typeof resource["height"] === "number" ? resource["height"] : undefined,
+    };
+  }
+
   verifyUploadResponse(
     folder: AllowedFolder,
     response: {
@@ -306,6 +421,9 @@ export class CloudinaryService {
           );
         }
       }
+    } else {
+      // Validate remote URL against SSRF and require HTTPS
+      this.validateRemoteUrl(fileInput);
     }
 
     if (this.isMock) {

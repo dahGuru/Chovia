@@ -195,6 +195,17 @@ describe("Sentry PII Scrubbing & Data Sanitization", () => {
     const rawKey = "Paystack rejected key: sk_live_1234567890abcdef1234567890";
     expect(sanitizeString(rawKey)).toBe("Paystack rejected key: sk_live_[REDACTED]");
   });
+
+  it("should not mutate the original Error object when capturing exceptions", () => {
+    const error = new Error("Failed with secret: sk_live_1234567890abcdef1234567890");
+    const originalMessage = error.message;
+
+    // Importing sentryService to verify captureException behavior
+    import("../integrations/sentry/sentry.service.js").then(({ sentryService }) => {
+      sentryService.captureException(error);
+      expect(error.message).toBe(originalMessage);
+    });
+  });
 });
 
 describe("Redis URL Parser (TLS, Credentials, DB Index)", () => {
@@ -225,6 +236,7 @@ describe("Redis URL Parser (TLS, Credentials, DB Index)", () => {
     expect(() => parseRedisUrl("redis://localhost:-5")).toThrow(/Malformed Redis URL|Invalid Redis port/i);
     expect(() => parseRedisUrl("redis://localhost:6379/99")).toThrow(/database index 99 out of valid range/i);
     expect(() => parseRedisUrl("redis://localhost:6379/notanumber")).toThrow(/Must be a numeric database index/i);
+    expect(() => parseRedisUrl("redis://redis.internal:6379?arbitrary=query")).toThrow(/query parameters .* are not supported/i);
   });
 });
 
@@ -292,6 +304,63 @@ describe("Cloudinary Integration & Validation Security", () => {
       cloudinary.validateUploadMetadata("restaurants", "image/jpeg", fourMbBytes);
       cloudinary.validateUploadMetadata("menu", "image/webp", fourMbBytes);
     }).not.toThrow();
+  });
+
+  it("should validate and reject SSRF remote URLs and enforce HTTPS", () => {
+    expect(() => cloudinary.validateRemoteUrl("http://example.com/image.png")).toThrow(
+      /Remote upload URLs must use HTTPS/i
+    );
+    expect(() => cloudinary.validateRemoteUrl("https://localhost/image.png")).toThrow(
+      /internal, loopback, or metadata services are forbidden/i
+    );
+    expect(() => cloudinary.validateRemoteUrl("https://127.0.0.1/secret")).toThrow(
+      /internal, loopback, or metadata services are forbidden/i
+    );
+    expect(() => cloudinary.validateRemoteUrl("https://169.254.169.254/latest/meta-data")).toThrow(
+      /internal, loopback, or metadata services are forbidden/i
+    );
+    expect(() => cloudinary.validateRemoteUrl("https://metadata.google.internal/computeMetadata")).toThrow(
+      /internal, loopback, or metadata services are forbidden/i
+    );
+    expect(() => cloudinary.validateRemoteUrl("https://192.168.1.50/private.png")).toThrow(
+      /internal, loopback, or metadata services are forbidden/i
+    );
+    expect(() => cloudinary.validateRemoteUrl("https://10.0.0.1/internal.jpg")).toThrow(
+      /internal, loopback, or metadata services are forbidden/i
+    );
+    expect(() => cloudinary.validateRemoteUrl("https://api.service.internal/upload.jpg")).toThrow(
+      /internal, loopback, or metadata services are forbidden/i
+    );
+
+    expect(() => cloudinary.validateRemoteUrl("https://images.unsplash.com/photo-12345")).not.toThrow();
+  });
+
+  it("should verify assets with provider and prevent cross-user avatar claims", async () => {
+    const validAvatar = await cloudinary.verifyAssetWithProvider(
+      "chovia/avatars/user_123_profile",
+      "avatars",
+      "user_123"
+    );
+    expect(validAvatar.publicId).toBe("chovia/avatars/user_123_profile");
+    expect(validAvatar.format).toBe("webp");
+
+    // Cross-user avatar claim must be rejected
+    await expect(
+      cloudinary.verifyAssetWithProvider(
+        "chovia/avatars/user_victim_profile",
+        "avatars",
+        "user_attacker"
+      )
+    ).rejects.toThrow(/Unauthorized asset claim/i);
+
+    // Wrong folder prefix must be rejected
+    await expect(
+      cloudinary.verifyAssetWithProvider(
+        "chovia/menu/dish_123",
+        "avatars",
+        "user_123"
+      )
+    ).rejects.toThrow(/does not belong to expected folder/i);
   });
 });
 

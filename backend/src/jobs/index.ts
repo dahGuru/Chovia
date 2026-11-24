@@ -7,6 +7,7 @@ import { closeQueues } from "./queues/index.js";
 export * from "./constants/jobs.constants.js";
 export * from "./types/jobs.types.js";
 export * from "./queues/index.js";
+export * from "./outbox/outbox.dispatcher.js";
 
 const activeWorkers: Worker[] = [];
 

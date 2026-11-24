@@ -50,56 +50,98 @@ export async function processDeliveryJob(job: Job): Promise<void> {
       },
     });
 
-    // 4. Filter by geographic proximity to restaurant & location freshness
+    // 4. Filter by geographic proximity to restaurant & strict location freshness
     const restLat = Number(delivery.order.restaurant.latitude);
     const restLng = Number(delivery.order.restaurant.longitude);
-    const freshnessCutoff = new Date(Date.now() - LOCATION_FRESHNESS_MINUTES * 60 * 1000);
+    const nowMs = Date.now();
+    const freshnessCutoff = new Date(nowMs - LOCATION_FRESHNESS_MINUTES * 60 * 1000);
+    const maxFutureTimestamp = new Date(nowMs + 60 * 1000); // Guard against future-dated timestamps
 
     const eligibleRiders = activeRiders.filter((rider) => {
-      // If rider has coordinates, verify location freshness and distance
-      if (rider.lastLatitude !== null && rider.lastLongitude !== null) {
-        if (rider.lastLocationUpdatedAt && rider.lastLocationUpdatedAt < freshnessCutoff) {
-          return false;
-        }
-        const distKm = calculateHaversineDistanceKm(
-          restLat,
-          restLng,
-          Number(rider.lastLatitude),
-          Number(rider.lastLongitude)
-        );
-        return distKm <= DISPATCH_RADIUS_KM;
+      // A rider must have non-null, valid finite coordinates
+      if (rider.lastLatitude === null || rider.lastLongitude === null) {
+        return false;
       }
-      // If rider has not updated location yet (e.g. test environment or initial setup), permit assignment if active & online
-      return true;
+      const lat = Number(rider.lastLatitude);
+      const lng = Number(rider.lastLongitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return false;
+      }
+      // Bounded coordinates: lat in [-90, 90], lng in [-180, 180]
+      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return false;
+      }
+      // Location update timestamp must exist, not be future-dated, and be fresh (<30m)
+      if (!rider.lastLocationUpdatedAt) {
+        return false;
+      }
+      if (rider.lastLocationUpdatedAt > maxFutureTimestamp) {
+        return false;
+      }
+      if (rider.lastLocationUpdatedAt < freshnessCutoff) {
+        return false;
+      }
+
+      const distKm = calculateHaversineDistanceKm(restLat, restLng, lat, lng);
+      return distKm <= DISPATCH_RADIUS_KM;
     });
 
-    const selectedRider = eligibleRiders[0];
-    if (selectedRider) {
-      await prisma.$transaction(async (tx) => {
-        // Atomic conditional assignment: ensure delivery is still READY with riderId null
-        const updateResult = await tx.delivery.updateMany({
+    let assigned = false;
+
+    // 5. Atomic rider claiming loop across eligible candidates
+    for (const candidateRider of eligibleRiders) {
+      const claimSucceeded = await prisma.$transaction(async (tx) => {
+        // A. Atomically claim rider: ensure rider is still active, online, available, without active deliveries
+        const riderClaimResult = await tx.riderProfile.updateMany({
+          where: {
+            id: candidateRider.id,
+            isAvailable: true,
+            isOnline: true,
+            status: "ACTIVE",
+            deliveries: {
+              none: {
+                status: { in: ["ASSIGNED", "OUT_FOR_DELIVERY"] },
+              },
+            },
+          },
+          data: {
+            isAvailable: false,
+          },
+        });
+
+        if (riderClaimResult.count === 0) {
+          // Rider was claimed by a concurrent process, advance to next candidate
+          return false;
+        }
+
+        // B. Atomically assign delivery
+        const deliveryUpdateResult = await tx.delivery.updateMany({
           where: {
             id: delivery.id,
             status: "READY",
             riderId: null,
           },
           data: {
-            riderId: selectedRider.id,
+            riderId: candidateRider.id,
             status: "ASSIGNED",
             assignedAt: new Date(),
           },
         });
 
-        if (updateResult.count === 0) {
-          // Concurrently assigned by another process or rider accepted manually
-          return;
+        if (deliveryUpdateResult.count === 0) {
+          // Delivery was already assigned or cancelled concurrently; release rider claim
+          await tx.riderProfile.update({
+            where: { id: candidateRider.id },
+            data: { isAvailable: true },
+          });
+          return false;
         }
 
         // Record assignment event in history
         await tx.deliveryAssignmentEvent.create({
           data: {
             deliveryId: delivery.id,
-            riderId: selectedRider.id,
+            riderId: candidateRider.id,
             type: "ASSIGNED",
           },
         });
@@ -110,7 +152,7 @@ export async function processDeliveryJob(job: Job): Promise<void> {
             orderId: delivery.orderId,
             fromStatus: delivery.order.status,
             toStatus: "ASSIGNED",
-            reason: `Auto-dispatched to active rider ${selectedRider.firstName} ${selectedRider.lastName}`,
+            reason: `Auto-dispatched to active rider ${candidateRider.firstName} ${candidateRider.lastName}`,
           },
         });
 
@@ -126,11 +168,11 @@ export async function processDeliveryJob(job: Job): Promise<void> {
             userId: delivery.order.customer.userId,
             type: "DELIVERY_ASSIGNED",
             title: "Rider Assigned",
-            message: `${selectedRider.firstName} has been assigned to deliver order #${delivery.order.orderNumber}.`,
+            message: `${candidateRider.firstName} has been assigned to deliver order #${delivery.order.orderNumber}.`,
             data: {
               orderId: delivery.orderId,
               deliveryId: delivery.id,
-              riderId: selectedRider.id,
+              riderId: candidateRider.id,
             },
           },
         });
@@ -138,7 +180,7 @@ export async function processDeliveryJob(job: Job): Promise<void> {
         // Notify rider of new delivery assignment
         await tx.notification.create({
           data: {
-            userId: selectedRider.userId,
+            userId: candidateRider.userId,
             type: "NEW_DELIVERY_AVAILABLE",
             title: "New Delivery Assigned",
             message: `You have been assigned order #${delivery.order.orderNumber} from ${delivery.order.restaurant.name}.`,
@@ -148,9 +190,18 @@ export async function processDeliveryJob(job: Job): Promise<void> {
             },
           },
         });
+
+        return true;
       });
-    } else {
-      // 5. No eligible riders found: track dispatch attempt and schedule durable retry with exponential backoff
+
+      if (claimSucceeded) {
+        assigned = true;
+        break;
+      }
+    }
+
+    if (!assigned) {
+      // 6. No eligible riders found or all claims failed: schedule durable retry with exponential backoff
       const currentAttempts = delivery.dispatchAttempts + 1;
 
       await prisma.delivery.update({
@@ -170,7 +221,26 @@ export async function processDeliveryJob(job: Job): Promise<void> {
             delayMs
           );
         } catch {
-          // If queue is down, outbox or worker loop will retry
+          // If queue is down, outbox backup guarantees retry
+        }
+
+        // Durable Outbox backup for no-rider retry
+        try {
+          await prisma.outboxEvent.create({
+            data: {
+              eventType: "DISPATCH_DELIVERY",
+              aggregateType: "DELIVERY",
+              aggregateId: delivery.id,
+              payload: {
+                orderId: data.orderId,
+                deliveryId: data.deliveryId,
+              },
+              status: "PENDING",
+              scheduledAt: new Date(Date.now() + delayMs),
+            },
+          });
+        } catch {
+          // Non-blocking
         }
 
         // Notify customer on initial search delay only to avoid notification spam

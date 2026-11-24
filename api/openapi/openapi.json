@@ -6290,6 +6290,15 @@
                       "type": "integer",
                       "minimum": -9007199254740991,
                       "maximum": 9007199254740991
+                    },
+                    "requiresReconciliation": {
+                      "type": "boolean"
+                    },
+                    "reconciliationReason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
@@ -6378,8 +6387,15 @@
                       "type": "string",
                       "enum": [
                         "REFUND_PENDING",
+                        "PROCESSING",
                         "REFUNDED",
                         "FAILED"
+                      ]
+                    },
+                    "providerRefundId": {
+                      "type": [
+                        "string",
+                        "null"
                       ]
                     },
                     "reason": {

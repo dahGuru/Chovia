@@ -29,6 +29,8 @@ export const verifyPaymentResponseSchema = z
     status: z.enum(["PENDING", "SUCCESS", "FAILED", "ABANDONED"]),
     paidAt: z.string().nullable().optional(),
     amountMinor: z.number().int(),
+    requiresReconciliation: z.boolean().optional(),
+    reconciliationReason: z.string().nullable().optional(),
   })
   .strict();
 
@@ -50,7 +52,8 @@ export const refundResponseSchema = z
     orderId: z.string().uuid(),
     amountMinor: z.number().int(),
     currency: z.string(),
-    status: z.enum(["REFUND_PENDING", "REFUNDED", "FAILED"]),
+    status: z.enum(["REFUND_PENDING", "PROCESSING", "REFUNDED", "FAILED"]),
+    providerRefundId: z.string().nullable().optional(),
     reason: z.string().nullable().optional(),
     requestedAt: z.string(),
     completedAt: z.string().nullable().optional(),

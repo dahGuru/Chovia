@@ -30,6 +30,21 @@ export function parseRedisUrl(redisUrl: string): RedisOptions {
     throw new Error("Redis URL missing valid hostname");
   }
 
+  // Reject query parameters to prevent ambiguous connection options or injection
+  if (url.search && url.search.length > 1) {
+    throw new Error(
+      `Redis connection URL query parameters ("${url.search}") are not supported. Configure TLS and connection options explicitly.`
+    );
+  }
+
+  // Reject localhost in production or staging
+  if (
+    (env.NODE_ENV === "production" || env.NODE_ENV === "staging") &&
+    (url.hostname === "localhost" || url.hostname === "127.0.0.1")
+  ) {
+    throw new Error(`Localhost Redis URL is strictly forbidden in ${env.NODE_ENV}`);
+  }
+
   let port = isTls ? 6380 : 6379;
   if (url.port) {
     port = Number.parseInt(url.port, 10);

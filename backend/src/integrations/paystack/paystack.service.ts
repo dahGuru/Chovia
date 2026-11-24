@@ -242,8 +242,8 @@ export class PaystackService {
       throw new PaymentGatewayError("Paystack verification network failure", error);
     }
 
-    // Distinguish provider server outage (5xx) from transaction outcome
-    if (response.status >= 500) {
+    // Distinguish provider server outage (5xx), auth failures (401), or rate limits (429) from transaction outcome
+    if (response.status >= 500 || response.status === 401 || response.status === 429) {
       throw new PaymentGatewayError(
         `Paystack verification service temporarily unavailable (HTTP ${response.status})`
       );
@@ -259,7 +259,7 @@ export class PaystackService {
     const parseResult = paystackVerifyApiResponseSchema.safeParse(rawJson);
 
     if (!parseResult.success) {
-      throw new BadRequestError(
+      throw new PaymentGatewayError(
         `Paystack verification response validation failed: ${parseResult.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(", ")}`
       );
     }
@@ -357,7 +357,7 @@ export class PaystackService {
       throw new PaymentGatewayError("Paystack refund network failure", error);
     }
 
-    if (response.status >= 500) {
+    if (response.status >= 500 || response.status === 401 || response.status === 429) {
       throw new PaymentGatewayError(`Paystack refund gateway error (HTTP ${response.status})`);
     }
 
@@ -370,7 +370,7 @@ export class PaystackService {
 
     const parsed = paystackRefundApiResponseSchema.safeParse(rawJson);
     if (!parsed.success) {
-      throw new BadRequestError(
+      throw new PaymentGatewayError(
         `Paystack refund response invalid: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(", ")}`
       );
     }

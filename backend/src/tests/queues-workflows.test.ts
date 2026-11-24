@@ -268,6 +268,63 @@ describe("Transactional Outbox Dispatcher (Atomic Claim, Dispatch, Retry)", () =
       enqueueSpy.mockRestore();
     }
   });
+
+  it("should recover stale PROCESSING events whose lease has expired", async () => {
+    const staleEvents = [
+      {
+        id: "evt_stale_1",
+        status: "PROCESSING",
+        attempts: 2,
+        updatedAt: new Date(Date.now() - 10 * 60 * 1000), // 10 minutes ago (> 5 min lease)
+      },
+      {
+        id: "evt_stale_max_attempts",
+        status: "PROCESSING",
+        attempts: 5, // Reached max attempts
+        updatedAt: new Date(Date.now() - 10 * 60 * 1000),
+      },
+    ];
+
+    const findManySpy = vi.spyOn(prisma.outboxEvent, "findMany").mockResolvedValueOnce(staleEvents as any);
+    const updateManySpy = vi.spyOn(prisma.outboxEvent, "updateMany")
+      .mockResolvedValueOnce({ count: 1 }) // evt_stale_1 recovered to PENDING
+      .mockResolvedValueOnce({ count: 1 }); // evt_stale_max_attempts recovered to FAILED
+
+    try {
+      const recovered = await outboxDispatcher.recoverStaleProcessingEvents();
+      expect(recovered).toBe(2);
+      expect(updateManySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: "evt_stale_1", status: "PROCESSING" }),
+          data: expect.objectContaining({ status: "PENDING" }),
+        })
+      );
+      expect(updateManySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ id: "evt_stale_max_attempts", status: "PROCESSING" }),
+          data: expect.objectContaining({ status: "FAILED" }),
+        })
+      );
+    } finally {
+      findManySpy.mockRestore();
+      updateManySpy.mockRestore();
+    }
+  });
+
+  it("should start and stop the recurring outbox dispatcher loop gracefully", async () => {
+    const recoverSpy = vi.spyOn(outboxDispatcher, "recoverStaleProcessingEvents").mockResolvedValue(0);
+    const dispatchSpy = vi.spyOn(outboxDispatcher, "dispatchPendingEvents").mockResolvedValue(0);
+
+    outboxDispatcher.start(50); // Fast interval for testing
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    expect(recoverSpy).toHaveBeenCalled();
+    expect(dispatchSpy).toHaveBeenCalled();
+
+    await outboxDispatcher.stop();
+    recoverSpy.mockRestore();
+    dispatchSpy.mockRestore();
+  });
 });
 
 describe("Delivery Dispatch Processor & Rider Lifecycle Constraints", () => {
@@ -363,6 +420,7 @@ describe("Delivery Dispatch Processor & Rider Lifecycle Constraints", () => {
     const txNotificationSpy = vi.fn().mockResolvedValue({});
 
     const mockTx = {
+      riderProfile: { updateMany: vi.fn().mockResolvedValue({ count: 1 }), update: vi.fn() },
       delivery: { updateMany: txDeliveryUpdateManySpy },
       deliveryAssignmentEvent: { create: txAssignmentEventSpy },
       orderStatusHistory: { create: txOrderHistorySpy },
@@ -455,6 +513,229 @@ describe("Delivery Dispatch Processor & Rider Lifecycle Constraints", () => {
       auditLogCreateSpy.mockRestore();
     }
   });
+
+  it("should reject riders with missing coordinates, out-of-range coordinates, or future-dated timestamps", async () => {
+    const delivery = {
+      id: "del_strict_geo",
+      orderId: "ord_strict_geo",
+      status: "READY",
+      riderId: null,
+      dispatchAttempts: 0,
+      order: {
+        id: "ord_strict_geo",
+        status: "READY",
+        orderNumber: "CHV-ORD-777",
+        restaurant: { name: "Tasty Bites", latitude: 6.5244, longitude: 3.3792 },
+        customer: { userId: "cust_7" },
+      },
+    };
+
+    const invalidRiders = [
+      {
+        id: "rider_no_coords",
+        userId: "usr_no_coords",
+        firstName: "No",
+        lastName: "Coords",
+        lastLatitude: null, // Missing coordinates
+        lastLongitude: null,
+        lastLocationUpdatedAt: new Date(),
+      },
+      {
+        id: "rider_out_of_range",
+        userId: "usr_out_of_range",
+        firstName: "Invalid",
+        lastName: "Range",
+        lastLatitude: 95.0, // Invalid latitude (> 90)
+        lastLongitude: 3.38,
+        lastLocationUpdatedAt: new Date(),
+      },
+      {
+        id: "rider_future_dated",
+        userId: "usr_future_dated",
+        firstName: "Future",
+        lastName: "Dated",
+        lastLatitude: 6.525,
+        lastLongitude: 3.38,
+        lastLocationUpdatedAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes in future
+      },
+    ];
+
+    const findDeliverySpy = vi.spyOn(prisma.delivery, "findUnique").mockResolvedValueOnce(delivery as any);
+    const findRidersSpy = vi.spyOn(prisma.riderProfile, "findMany").mockResolvedValueOnce(invalidRiders as any);
+    const deliveryUpdateSpy = vi.spyOn(prisma.delivery, "update").mockResolvedValueOnce({} as any);
+    const notificationFindSpy = vi.spyOn(prisma.notification, "findFirst").mockResolvedValueOnce(null);
+    const notificationCreateSpy = vi.spyOn(prisma.notification, "create").mockResolvedValueOnce({} as any);
+    const outboxCreateSpy = vi.spyOn(prisma.outboxEvent, "create").mockResolvedValueOnce({} as any);
+
+    try {
+      const mockJob = {
+        name: JOB_NAMES.CHECK_DELIVERY_TIMEOUT,
+        data: { deliveryId: "del_strict_geo", orderId: "ord_strict_geo" },
+      } as Job;
+
+      await processDeliveryJob(mockJob);
+
+      // No rider assigned, dispatch attempts incremented
+      expect(deliveryUpdateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ dispatchAttempts: 1 }),
+        })
+      );
+    } finally {
+      findDeliverySpy.mockRestore();
+      findRidersSpy.mockRestore();
+      deliveryUpdateSpy.mockRestore();
+      notificationFindSpy.mockRestore();
+      notificationCreateSpy.mockRestore();
+      outboxCreateSpy.mockRestore();
+    }
+  });
+
+  it("should advance to next candidate when first rider atomic claim fails due to concurrency", async () => {
+    const delivery = {
+      id: "del_race",
+      orderId: "ord_race",
+      status: "READY",
+      riderId: null,
+      dispatchAttempts: 0,
+      order: {
+        id: "ord_race",
+        status: "READY",
+        orderNumber: "CHV-ORD-888",
+        restaurant: { name: "Tasty Bites", latitude: 6.5244, longitude: 3.3792 },
+        customer: { userId: "cust_8" },
+      },
+    };
+
+    const eligibleRiders = [
+      {
+        id: "rider_taken_concurrently",
+        userId: "usr_taken",
+        firstName: "First",
+        lastName: "Candidate",
+        lastLatitude: 6.525,
+        lastLongitude: 3.38,
+        lastLocationUpdatedAt: new Date(),
+      },
+      {
+        id: "rider_second_available",
+        userId: "usr_available",
+        firstName: "Second",
+        lastName: "Candidate",
+        lastLatitude: 6.526,
+        lastLongitude: 3.381,
+        lastLocationUpdatedAt: new Date(),
+      },
+    ];
+
+    const findDeliverySpy = vi.spyOn(prisma.delivery, "findUnique").mockResolvedValueOnce(delivery as any);
+    const findRidersSpy = vi.spyOn(prisma.riderProfile, "findMany").mockResolvedValueOnce(eligibleRiders as any);
+
+    const txDeliveryUpdateManySpy = vi.fn().mockResolvedValue({ count: 1 });
+
+    // Mock transaction: first rider claim returns count = 0 (taken), second rider claim returns count = 1 (won)
+    const txSpy = vi.spyOn(prisma, "$transaction")
+      .mockImplementationOnce(async (cb: any) => {
+        return cb({
+          riderProfile: {
+            updateMany: vi.fn().mockResolvedValue({ count: 0 }), // Lost race for first rider
+          },
+        });
+      })
+      .mockImplementationOnce(async (cb: any) => {
+        return cb({
+          riderProfile: {
+            updateMany: vi.fn().mockResolvedValue({ count: 1 }), // Won race for second rider
+          },
+          delivery: { updateMany: txDeliveryUpdateManySpy },
+          deliveryAssignmentEvent: { create: vi.fn().mockResolvedValue({}) },
+          orderStatusHistory: { create: vi.fn().mockResolvedValue({}) },
+          order: { update: vi.fn().mockResolvedValue({}) },
+          notification: { create: vi.fn().mockResolvedValue({}) },
+        });
+      });
+
+    try {
+      const mockJob = {
+        name: JOB_NAMES.CHECK_DELIVERY_TIMEOUT,
+        data: { deliveryId: "del_race", orderId: "ord_race" },
+      } as Job;
+
+      await processDeliveryJob(mockJob);
+
+      // Verify delivery assigned to second candidate
+      expect(txDeliveryUpdateManySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            riderId: "rider_second_available",
+            status: "ASSIGNED",
+          }),
+        })
+      );
+    } finally {
+      findDeliverySpy.mockRestore();
+      findRidersSpy.mockRestore();
+      txSpy.mockRestore();
+    }
+  });
+
+  it("should restore rider availability when delivery is completed", async () => {
+    const { deliveryService } = await import("../modules/delivery/delivery.service.js");
+
+    const mockRider = {
+      id: "rider_comp_1",
+      userId: "usr_rider_comp",
+      isAvailable: false,
+    };
+
+    const mockDelivery = {
+      id: "del_comp_1",
+      orderId: "ord_comp_1",
+      riderId: "rider_comp_1",
+      status: "OUT_FOR_DELIVERY",
+      order: { restaurantId: "rest_1" },
+    };
+
+    const findRiderSpy = vi.spyOn(prisma.riderProfile, "findUnique").mockResolvedValueOnce(mockRider as any);
+    const findDeliverySpy = vi.spyOn(prisma.delivery, "findUnique").mockResolvedValueOnce(mockDelivery as any);
+
+    const txRiderProfileUpdateSpy = vi.fn().mockResolvedValue({});
+    const mockTx = {
+      delivery: {
+        update: vi.fn().mockResolvedValue({
+          id: "del_comp_1",
+          orderId: "ord_comp_1",
+          status: "DELIVERED",
+          deliveredAt: new Date(),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          order: { id: "ord_comp_1", restaurant: {} },
+        }),
+      },
+      orderStatusHistory: { create: vi.fn().mockResolvedValue({}) },
+      order: { update: vi.fn().mockResolvedValue({}) },
+      riderProfile: { update: txRiderProfileUpdateSpy },
+    };
+
+    const txSpy = vi.spyOn(prisma, "$transaction").mockImplementationOnce(async (cb: any) => {
+      return cb(mockTx);
+    });
+
+    try {
+      const result = await deliveryService.completeDelivery("usr_rider_comp", "del_comp_1");
+      expect(result.status).toBe("DELIVERED");
+      expect(txRiderProfileUpdateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "rider_comp_1" },
+          data: { isAvailable: true },
+        })
+      );
+    } finally {
+      findRiderSpy.mockRestore();
+      findDeliverySpy.mockRestore();
+      txSpy.mockRestore();
+    }
+  });
 });
 
 describe("Expo Push Service & Token Maintenance", () => {
@@ -493,6 +774,42 @@ describe("Expo Push Service & Token Maintenance", () => {
         })
       );
     } finally {
+      userDeviceUpdateSpy.mockRestore();
+    }
+  });
+
+  it("should fetch push notification receipts and deactivate invalid tokens", async () => {
+    const receipts = await expoPushService.getPushNotificationReceipts(["rcpt_1", "rcpt_2"]);
+    expect(receipts["rcpt_1"]).toBeDefined();
+    expect(receipts["rcpt_1"].status).toBe("ok");
+
+    const userDeviceUpdateSpy = vi.spyOn(prisma.userDevice, "updateMany").mockResolvedValue({ count: 1 });
+    const getReceiptsSpy = vi.spyOn(expoPushService, "getPushNotificationReceipts").mockResolvedValueOnce({
+      rcpt_dead: {
+        status: "error",
+        details: { error: "DeviceNotRegistered" },
+      },
+      rcpt_active: {
+        status: "ok",
+      },
+    });
+
+    try {
+      const summary = await expoPushService.processReceiptsAndDeactivateInvalid([
+        { receiptId: "rcpt_dead", expoPushToken: "ExponentPushToken[unregistered_device]" },
+        { receiptId: "rcpt_active", expoPushToken: "ExponentPushToken[valid_device]" },
+      ]);
+
+      expect(summary.processed).toBe(2);
+      expect(summary.deactivated).toBe(1);
+      expect(userDeviceUpdateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { expoPushToken: "ExponentPushToken[unregistered_device]" },
+          data: { isActive: false },
+        })
+      );
+    } finally {
+      getReceiptsSpy.mockRestore();
       userDeviceUpdateSpy.mockRestore();
     }
   });

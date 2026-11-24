@@ -219,12 +219,7 @@ export const usersRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const body = verifyUploadRequestSchema.parse(request.body);
       await verifyUploadAuthorization(request.user, body.folder, body.restaurantId);
-      cloudinaryService.verifyUploadResponse(body.folder, {
-        publicId: body.publicId,
-        format: body.format,
-        bytes: body.bytes,
-        resourceType: body.resourceType,
-      });
+      await cloudinaryService.verifyAssetWithProvider(body.publicId, body.folder, request.user.id);
 
       return reply.status(200).send({
         verified: true,

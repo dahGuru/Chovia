@@ -220,9 +220,7 @@ export class SentryService {
     }
 
     try {
-      if (error instanceof Error) {
-        error.message = sanitizeString(error.message);
-      }
+      // Do not mutate original Error object; scrubbing is handled non-mutatively in beforeSend
       Sentry.withScope((scope) => {
         if (context) {
           scope.setExtras(scrubData(context) as Record<string, unknown>);
