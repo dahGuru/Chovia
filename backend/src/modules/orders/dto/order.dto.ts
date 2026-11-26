@@ -101,3 +101,15 @@ export const orderResponseSchema = z
   .strict();
 
 export type OrderResponseDto = z.infer<typeof orderResponseSchema>;
+
+export const paginatedOrdersResponseSchema = z
+  .object({
+    items: z.array(orderResponseSchema),
+    total: z.number().int().nonnegative(),
+    page: z.number().int().positive(),
+    limit: z.number().int().positive(),
+    totalPages: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export type PaginatedOrdersResponseDto = z.infer<typeof paginatedOrdersResponseSchema>;

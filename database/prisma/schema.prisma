@@ -53,6 +53,20 @@ enum RiderStatus {
   DEACTIVATED
 }
 
+enum RiderKycStatus {
+  PENDING
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum RiderDocumentType {
+  GOVERNMENT_ID
+  DRIVER_LICENSE
+  VEHICLE_REGISTRATION
+  SELFIE
+}
+
 enum DayOfWeek {
   MONDAY
   TUESDAY
@@ -287,12 +301,13 @@ model RiderProfile {
   status    RiderStatus @default(PENDING)
 
   isOnline              Boolean   @default(false)
-  isAvailable           Boolean   @default(true)
+  isAvailable           Boolean   @default(false)
   lastLatitude          Decimal?  @db.Decimal(10, 7)
   lastLongitude         Decimal?  @db.Decimal(10, 7)
   lastLocationUpdatedAt DateTime?
 
-  vehicleType String?
+  operatingCity      String?
+  vehicleType        String?
   vehiclePlateNumber String?
 
   createdAt DateTime @default(now())
@@ -300,12 +315,76 @@ model RiderProfile {
 
   user User @relation(fields: [userId], references: [id])
 
-  deliveries Delivery[]
+  kycApplication   RiderKycApplication?
+  deliveries       Delivery[]
   assignmentEvents DeliveryAssignmentEvent[]
 
   @@index([status])
   @@index([status, isOnline, isAvailable])
   @@map("rider_profiles")
+}
+
+model RiderKycApplication {
+  id             String         @id @default(uuid()) @db.Uuid
+  riderProfileId String         @unique @db.Uuid
+  status         RiderKycStatus @default(PENDING)
+
+  firstName     String
+  lastName      String
+  phone         String
+  operatingCity String
+  homeAddress   String?
+
+  vehicleType        String
+  vehiclePlateNumber String?
+
+  governmentIdType        String
+  encryptedGovernmentId String
+  governmentIdMasked      String
+
+  bankName                   String
+  bankCode                   String?
+  accountHolderName          String
+  encryptedBankAccountNumber String
+  bankAccountMasked          String
+
+  submittedAt      DateTime  @default(now())
+  reviewedAt       DateTime?
+  reviewedByUserId String?   @db.Uuid
+  rejectionReason  String?
+  reviewNotes      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  riderProfile RiderProfile    @relation(fields: [riderProfileId], references: [id], onDelete: Cascade)
+  documents    RiderDocument[]
+
+  @@index([status])
+  @@index([submittedAt])
+  @@map("rider_kyc_applications")
+}
+
+model RiderDocument {
+  id              String            @id @default(uuid()) @db.Uuid
+  applicationId   String            @db.Uuid
+  documentType    RiderDocumentType
+  storageProvider String            @default("CLOUDINARY")
+  publicId        String
+  resourceType    String
+  deliveryType    String            @default("authenticated")
+  format          String?
+  bytes           Int?
+  verifiedAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  application RiderKycApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, documentType])
+  @@index([applicationId])
+  @@map("rider_documents")
 }
 
 
@@ -903,7 +982,8 @@ model Notification {
 
   createdAt DateTime @default(now())
 
-  user User @relation(fields: [userId], references: [id])
+  user       User                   @relation(fields: [userId], references: [id])
+  deliveries NotificationDelivery[]
 
   @@index([userId, createdAt])
   @@index([userId, readAt])
@@ -932,11 +1012,43 @@ model UserDevice {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user          User           @relation(fields: [userId], references: [id])
-  refreshTokens RefreshToken[]
+  user                   User                   @relation(fields: [userId], references: [id])
+  refreshTokens          RefreshToken[]
+  notificationDeliveries NotificationDelivery[]
 
   @@index([userId, isActive])
   @@map("user_devices")
+}
+
+enum NotificationDeliveryStatus {
+  QUEUED
+  SUBMITTED
+  DELIVERED
+  FAILED
+}
+
+model NotificationDelivery {
+  id             String                     @id @default(uuid()) @db.Uuid
+  notificationId String                     @db.Uuid
+  deviceId       String?                    @db.Uuid
+  expoPushToken  String
+  ticketId       String?                    @unique
+  status         NotificationDeliveryStatus @default(QUEUED)
+  errorMessage   String?
+  receiptStatus  String?
+  submittedAt    DateTime?
+  deliveredAt    DateTime?
+  failedAt       DateTime?
+  createdAt      DateTime                   @default(now())
+  updatedAt      DateTime                   @updatedAt
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  device       UserDevice?  @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@index([notificationId])
+  @@index([status])
+  @@index([ticketId])
+  @@map("notification_deliveries")
 }
 
 
@@ -1034,20 +1146,23 @@ model DeliveryPricingConfig {
 // ============================================================
 
 model OutboxEvent {
-  id            String            @id @default(uuid()) @db.Uuid
-  eventType     String
-  aggregateType String
-  aggregateId   String
-  payload       Json
-  status        OutboxEventStatus @default(PENDING)
-  attempts      Int               @default(0)
-  lastError     String?
-  scheduledAt   DateTime          @default(now())
-  processedAt   DateTime?
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
+  id             String            @id @default(uuid()) @db.Uuid
+  eventType      String
+  aggregateType  String
+  aggregateId    String
+  payload        Json
+  status         OutboxEventStatus @default(PENDING)
+  attempts       Int               @default(0)
+  claimToken     String?           @db.Uuid
+  leaseExpiresAt DateTime?
+  lastError      String?
+  scheduledAt    DateTime          @default(now())
+  processedAt    DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
 
   @@index([status, scheduledAt])
+  @@index([status, leaseExpiresAt])
   @@index([aggregateType, aggregateId])
   @@map("outbox_events")
 }

@@ -3,11 +3,13 @@ import { prisma } from "../../database/prisma.js";
 import { JOB_NAMES } from "../constants/jobs.constants.js";
 import type { CheckDeliveryTimeoutJobData } from "../types/jobs.types.js";
 import { calculateHaversineDistanceKm } from "../../utils/geo.js";
-import { enqueueDeliveryTimeoutCheck } from "../queues/index.js";
+import {
+  validateRiderEligibility,
+  LOCATION_FRESHNESS_MINUTES,
+} from "../../modules/delivery/delivery-eligibility.js";
 
 const MAX_DISPATCH_ATTEMPTS = 3;
 const DISPATCH_RADIUS_KM = 10.0;
-const LOCATION_FRESHNESS_MINUTES = 30;
 
 export async function processDeliveryJob(job: Job): Promise<void> {
   if (job.name === JOB_NAMES.CHECK_DELIVERY_TIMEOUT) {
@@ -53,35 +55,18 @@ export async function processDeliveryJob(job: Job): Promise<void> {
     // 4. Filter by geographic proximity to restaurant & strict location freshness
     const restLat = Number(delivery.order.restaurant.latitude);
     const restLng = Number(delivery.order.restaurant.longitude);
-    const nowMs = Date.now();
-    const freshnessCutoff = new Date(nowMs - LOCATION_FRESHNESS_MINUTES * 60 * 1000);
-    const maxFutureTimestamp = new Date(nowMs + 60 * 1000); // Guard against future-dated timestamps
 
     const eligibleRiders = activeRiders.filter((rider) => {
-      // A rider must have non-null, valid finite coordinates
-      if (rider.lastLatitude === null || rider.lastLongitude === null) {
-        return false;
-      }
-      const lat = Number(rider.lastLatitude);
-      const lng = Number(rider.lastLongitude);
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-        return false;
-      }
-      // Bounded coordinates: lat in [-90, 90], lng in [-180, 180]
-      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-        return false;
-      }
-      // Location update timestamp must exist, not be future-dated, and be fresh (<30m)
-      if (!rider.lastLocationUpdatedAt) {
-        return false;
-      }
-      if (rider.lastLocationUpdatedAt > maxFutureTimestamp) {
-        return false;
-      }
-      if (rider.lastLocationUpdatedAt < freshnessCutoff) {
+      const eligibility = validateRiderEligibility(rider, {
+        maxAgeMinutes: LOCATION_FRESHNESS_MINUTES,
+        requireAvailable: true,
+      });
+      if (!eligibility.eligible) {
         return false;
       }
 
+      const lat = Number(rider.lastLatitude);
+      const lng = Number(rider.lastLongitude);
       const distKm = calculateHaversineDistanceKm(restLat, restLng, lat, lng);
       return distKm <= DISPATCH_RADIUS_KM;
     });
@@ -215,16 +200,8 @@ export async function processDeliveryJob(job: Job): Promise<void> {
       if (currentAttempts < MAX_DISPATCH_ATTEMPTS) {
         // Schedule next retry with exponential backoff (e.g. 1m, 2m, 4m)
         const delayMs = Math.min(300000, Math.pow(2, currentAttempts - 1) * 60000);
-        try {
-          await enqueueDeliveryTimeoutCheck(
-            { orderId: data.orderId, deliveryId: data.deliveryId },
-            delayMs
-          );
-        } catch {
-          // If queue is down, outbox backup guarantees retry
-        }
 
-        // Durable Outbox backup for no-rider retry
+        // Durable Outbox event is the single authoritative retry path (no duplicate direct BullMQ scheduling)
         try {
           await prisma.outboxEvent.create({
             data: {

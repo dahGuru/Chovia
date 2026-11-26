@@ -3,6 +3,7 @@ import {
   AUTH_CONSTRAINTS,
   isValidEmail,
   isValidPhoneNumber,
+  normalizeNigerianPhone,
   isValidLatitude,
   isValidLongitude,
 } from "./index.js";
@@ -16,6 +17,20 @@ describe("Shared Validation Constraints", () => {
   it("validates E.164 phone numbers", () => {
     expect(isValidPhoneNumber("+2348012345678")).toBe(true);
     expect(isValidPhoneNumber("not-a-phone")).toBe(false);
+  });
+
+  it("normalizes Nigerian local and E.164 numbers safely", () => {
+    expect(normalizeNigerianPhone("08054093095")).toBe("+2348054093095");
+    expect(normalizeNigerianPhone("0805 409 3095")).toBe("+2348054093095");
+    expect(normalizeNigerianPhone("0901-234-5678")).toBe("+2349012345678");
+    expect(normalizeNigerianPhone("2348054093095")).toBe("+2348054093095");
+    expect(normalizeNigerianPhone("+2348054093095")).toBe("+2348054093095");
+    expect(normalizeNigerianPhone("+447911123456")).toBe("+447911123456");
+    expect(normalizeNigerianPhone("0805409")).toBeNull();
+    expect(normalizeNigerianPhone("00054093095")).toBeNull();
+    expect(normalizeNigerianPhone("+23408054093095")).toBeNull();
+    expect(normalizeNigerianPhone("abc-1234567")).toBeNull();
+    expect(normalizeNigerianPhone("")).toBeNull();
   });
 
   it("validates coordinate boundaries", () => {

@@ -357,7 +357,7 @@
                   },
                   "phone": {
                     "type": "string",
-                    "pattern": "^\\+?[1-9]\\d{7,14}$"
+                    "pattern": "^\\+[1-9]\\d{7,14}$"
                   }
                 },
                 "required": [
@@ -473,6 +473,209 @@
                   "required": [
                     "user",
                     "otpData"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/rider/register": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "description": "Register a new rider account with a PENDING rider profile",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "format": "email",
+                    "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 100,
+                    "pattern": "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).*$"
+                  },
+                  "firstName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "lastName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "phone": {
+                    "type": "string",
+                    "pattern": "^\\+[1-9]\\d{7,14}$"
+                  }
+                },
+                "required": [
+                  "email",
+                  "password",
+                  "firstName",
+                  "lastName",
+                  "phone"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "user": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "email": {
+                          "type": "string",
+                          "format": "email",
+                          "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+                        },
+                        "role": {
+                          "type": "string",
+                          "enum": [
+                            "CUSTOMER",
+                            "RESTAURANT_STAFF",
+                            "RIDER",
+                            "ADMIN"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "ACTIVE",
+                            "SUSPENDED",
+                            "DEACTIVATED"
+                          ]
+                        },
+                        "emailVerified": {
+                          "type": "boolean"
+                        },
+                        "phoneVerified": {
+                          "type": "boolean"
+                        },
+                        "firstName": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "lastName": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "phone": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "email",
+                        "role",
+                        "status",
+                        "emailVerified",
+                        "phoneVerified",
+                        "createdAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "otpData": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        },
+                        "signedToken": {
+                          "type": "string"
+                        },
+                        "expiresInMinutes": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "signedToken",
+                        "expiresInMinutes"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "riderProfile": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "PENDING",
+                            "ACTIVE",
+                            "SUSPENDED",
+                            "DEACTIVATED"
+                          ]
+                        },
+                        "isOnline": {
+                          "type": "boolean"
+                        },
+                        "isAvailable": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "status",
+                        "isOnline",
+                        "isAvailable"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "emailDeliveryStatus": {
+                      "type": "string",
+                      "enum": [
+                        "SENT",
+                        "FAILED_RETRYABLE"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "user",
+                    "otpData",
+                    "riderProfile",
+                    "emailDeliveryStatus"
                   ],
                   "additionalProperties": false
                 }
@@ -1740,6 +1943,13 @@
                     "resourceType": {
                       "type": "string"
                     },
+                    "deliveryType": {
+                      "type": "string",
+                      "enum": [
+                        "upload",
+                        "authenticated"
+                      ]
+                    },
                     "publicId": {
                       "type": "string"
                     }
@@ -1768,7 +1978,7 @@
           "Users",
           "Uploads"
         ],
-        "description": "Upload image directly to Cloudinary via server",
+        "description": "Upload image or document directly to Cloudinary via server",
         "requestBody": {
           "required": true,
           "content": {
@@ -1841,6 +2051,13 @@
                     "secureUrl": {
                       "type": "string"
                     },
+                    "deliveryType": {
+                      "type": "string",
+                      "enum": [
+                        "upload",
+                        "authenticated"
+                      ]
+                    },
                     "width": {
                       "type": "number"
                     },
@@ -1852,6 +2069,9 @@
                     },
                     "bytes": {
                       "type": "number"
+                    },
+                    "resourceType": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -4739,7 +4959,7 @@
         "tags": [
           "Orders"
         ],
-        "description": "List orders for authenticated customer or restaurant staff",
+        "description": "List orders scoped to authenticated customer, rider, restaurant staff, or admin",
         "parameters": [
           {
             "schema": {
@@ -4805,189 +5025,222 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "format": "uuid",
-                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                      },
-                      "orderNumber": {
-                        "type": "string"
-                      },
-                      "restaurantId": {
-                        "type": "string",
-                        "format": "uuid",
-                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                      },
-                      "restaurantName": {
-                        "type": "string"
-                      },
-                      "customerId": {
-                        "type": "string",
-                        "format": "uuid",
-                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                      },
-                      "status": {
-                        "type": "string"
-                      },
-                      "subtotalMinor": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "subtotalFormatted": {
-                        "type": "string"
-                      },
-                      "deliveryFeeMinor": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "deliveryFeeFormatted": {
-                        "type": "string"
-                      },
-                      "totalAmountMinor": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "totalAmountFormatted": {
-                        "type": "string"
-                      },
-                      "deliveryAddressText": {
-                        "type": "string"
-                      },
-                      "deliveryDistanceKm": {
-                        "type": [
-                          "number",
-                          "null"
-                        ]
-                      },
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
                       "items": {
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "id": {
-                              "type": "string",
-                              "format": "uuid",
-                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                            },
-                            "itemName": {
-                              "type": "string"
-                            },
-                            "unitPriceMinor": {
-                              "type": "integer",
-                              "minimum": -9007199254740991,
-                              "maximum": 9007199254740991
-                            },
-                            "unitPriceFormatted": {
-                              "type": "string"
-                            },
-                            "quantity": {
-                              "type": "integer",
-                              "minimum": -9007199254740991,
-                              "maximum": 9007199254740991
-                            },
-                            "lineTotalMinor": {
-                              "type": "integer",
-                              "minimum": -9007199254740991,
-                              "maximum": 9007199254740991
-                            },
-                            "lineTotalFormatted": {
-                              "type": "string"
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "orderNumber": {
+                            "type": "string"
+                          },
+                          "restaurantId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "restaurantName": {
+                            "type": "string"
+                          },
+                          "customerId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "subtotalMinor": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "subtotalFormatted": {
+                            "type": "string"
+                          },
+                          "deliveryFeeMinor": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "deliveryFeeFormatted": {
+                            "type": "string"
+                          },
+                          "totalAmountMinor": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "totalAmountFormatted": {
+                            "type": "string"
+                          },
+                          "deliveryAddressText": {
+                            "type": "string"
+                          },
+                          "deliveryDistanceKm": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "items": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "format": "uuid",
+                                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                                },
+                                "itemName": {
+                                  "type": "string"
+                                },
+                                "unitPriceMinor": {
+                                  "type": "integer",
+                                  "minimum": -9007199254740991,
+                                  "maximum": 9007199254740991
+                                },
+                                "unitPriceFormatted": {
+                                  "type": "string"
+                                },
+                                "quantity": {
+                                  "type": "integer",
+                                  "minimum": -9007199254740991,
+                                  "maximum": 9007199254740991
+                                },
+                                "lineTotalMinor": {
+                                  "type": "integer",
+                                  "minimum": -9007199254740991,
+                                  "maximum": 9007199254740991
+                                },
+                                "lineTotalFormatted": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "itemName",
+                                "unitPriceMinor",
+                                "unitPriceFormatted",
+                                "quantity",
+                                "lineTotalMinor",
+                                "lineTotalFormatted"
+                              ],
+                              "additionalProperties": false
                             }
                           },
-                          "required": [
-                            "id",
-                            "itemName",
-                            "unitPriceMinor",
-                            "unitPriceFormatted",
-                            "quantity",
-                            "lineTotalMinor",
-                            "lineTotalFormatted"
-                          ],
-                          "additionalProperties": false
-                        }
-                      },
-                      "statusHistory": {
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "id": {
-                              "type": "string",
-                              "format": "uuid",
-                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                            },
-                            "fromStatus": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
-                            },
-                            "toStatus": {
-                              "type": "string"
-                            },
-                            "reason": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
-                            },
-                            "createdAt": {
-                              "type": "string"
+                          "statusHistory": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "format": "uuid",
+                                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                                },
+                                "fromStatus": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "toStatus": {
+                                  "type": "string"
+                                },
+                                "reason": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "createdAt": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "toStatus",
+                                "createdAt"
+                              ],
+                              "additionalProperties": false
                             }
                           },
-                          "required": [
-                            "id",
-                            "toStatus",
-                            "createdAt"
-                          ],
-                          "additionalProperties": false
-                        }
-                      },
-                      "paymentStatus": {
-                        "type": "string"
-                      },
-                      "rejectionReason": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "cancelledReason": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "createdAt": {
-                        "type": "string"
+                          "paymentStatus": {
+                            "type": "string"
+                          },
+                          "rejectionReason": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "cancelledReason": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "orderNumber",
+                          "restaurantId",
+                          "restaurantName",
+                          "customerId",
+                          "status",
+                          "subtotalMinor",
+                          "subtotalFormatted",
+                          "deliveryFeeMinor",
+                          "deliveryFeeFormatted",
+                          "totalAmountMinor",
+                          "totalAmountFormatted",
+                          "deliveryAddressText",
+                          "items",
+                          "createdAt"
+                        ],
+                        "additionalProperties": false
                       }
                     },
-                    "required": [
-                      "id",
-                      "orderNumber",
-                      "restaurantId",
-                      "restaurantName",
-                      "customerId",
-                      "status",
-                      "subtotalMinor",
-                      "subtotalFormatted",
-                      "deliveryFeeMinor",
-                      "deliveryFeeFormatted",
-                      "totalAmountMinor",
-                      "totalAmountFormatted",
-                      "deliveryAddressText",
-                      "items",
-                      "createdAt"
-                    ],
-                    "additionalProperties": false
-                  }
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "page": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "totalPages": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total",
+                    "page",
+                    "limit",
+                    "totalPages"
+                  ],
+                  "additionalProperties": false
                 }
               }
             }
@@ -6430,12 +6683,13 @@
         }
       }
     },
-    "/api/v1/riders/status": {
-      "patch": {
+    "/api/v1/riders/me": {
+      "get": {
         "tags": [
-          "Delivery"
+          "Delivery",
+          "Riders"
         ],
-        "description": "Toggle rider online/offline availability status",
+        "description": "Get authenticated rider profile, availability, location, and KYC status",
         "security": [
           {
             "bearerAuth": []
@@ -6443,7 +6697,881 @@
         ],
         "responses": {
           "200": {
-            "description": "Default Response"
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "userId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "firstName": {
+                      "type": "string"
+                    },
+                    "lastName": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "PENDING",
+                        "ACTIVE",
+                        "SUSPENDED",
+                        "DEACTIVATED"
+                      ]
+                    },
+                    "isOnline": {
+                      "type": "boolean"
+                    },
+                    "isAvailable": {
+                      "type": "boolean"
+                    },
+                    "operatingCity": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "vehicleType": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "vehiclePlateNumber": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "lastLatitude": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "lastLongitude": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "lastLocationUpdatedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "kycStatus": {
+                      "type": "string",
+                      "enum": [
+                        "NOT_SUBMITTED",
+                        "PENDING",
+                        "UNDER_REVIEW",
+                        "APPROVED",
+                        "REJECTED"
+                      ]
+                    },
+                    "kycRejectionReason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "activeDeliveryCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "userId",
+                    "firstName",
+                    "lastName",
+                    "status",
+                    "isOnline",
+                    "isAvailable",
+                    "kycStatus",
+                    "activeDeliveryCount"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/riders/kyc": {
+      "get": {
+        "tags": [
+          "Delivery",
+          "Riders"
+        ],
+        "description": "Get authenticated rider KYC application and verification status",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "riderProfileId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "userId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "email": {
+                          "type": "string",
+                          "format": "email",
+                          "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "PENDING",
+                            "UNDER_REVIEW",
+                            "APPROVED",
+                            "REJECTED"
+                          ]
+                        },
+                        "riderStatus": {
+                          "type": "string",
+                          "enum": [
+                            "PENDING",
+                            "ACTIVE",
+                            "SUSPENDED",
+                            "DEACTIVATED"
+                          ]
+                        },
+                        "firstName": {
+                          "type": "string"
+                        },
+                        "lastName": {
+                          "type": "string"
+                        },
+                        "phone": {
+                          "type": "string"
+                        },
+                        "operatingCity": {
+                          "type": "string"
+                        },
+                        "homeAddress": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "vehicleType": {
+                          "type": "string"
+                        },
+                        "vehiclePlateNumber": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "governmentIdType": {
+                          "type": "string"
+                        },
+                        "governmentIdMasked": {
+                          "type": "string"
+                        },
+                        "bankName": {
+                          "type": "string"
+                        },
+                        "bankCode": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "accountHolderName": {
+                          "type": "string"
+                        },
+                        "bankAccountMasked": {
+                          "type": "string"
+                        },
+                        "submittedAt": {
+                          "type": "string"
+                        },
+                        "reviewedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "rejectionReason": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "reviewNotes": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "documents": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                              },
+                              "documentType": {
+                                "type": "string",
+                                "enum": [
+                                  "GOVERNMENT_ID",
+                                  "DRIVER_LICENSE",
+                                  "VEHICLE_REGISTRATION",
+                                  "SELFIE"
+                                ]
+                              },
+                              "publicId": {
+                                "type": "string"
+                              },
+                              "resourceType": {
+                                "type": "string"
+                              },
+                              "deliveryType": {
+                                "type": "string"
+                              },
+                              "format": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "bytes": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "signedAccessUrl": {
+                                "type": "string"
+                              },
+                              "verifiedAt": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "documentType",
+                              "publicId",
+                              "resourceType",
+                              "deliveryType",
+                              "signedAccessUrl"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "riderProfileId",
+                        "status",
+                        "riderStatus",
+                        "firstName",
+                        "lastName",
+                        "phone",
+                        "operatingCity",
+                        "vehicleType",
+                        "governmentIdType",
+                        "governmentIdMasked",
+                        "bankName",
+                        "accountHolderName",
+                        "bankAccountMasked",
+                        "submittedAt",
+                        "documents"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Delivery",
+          "Riders"
+        ],
+        "description": "Submit or resubmit rider KYC verification application",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "firstName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "lastName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "phone": {
+                    "type": "string",
+                    "pattern": "^\\+[1-9]\\d{7,14}$"
+                  },
+                  "operatingCity": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 100
+                  },
+                  "homeAddress": {
+                    "type": "string",
+                    "minLength": 5,
+                    "maxLength": 255
+                  },
+                  "vehicleType": {
+                    "type": "string",
+                    "enum": [
+                      "MOTORCYCLE",
+                      "BICYCLE",
+                      "CAR"
+                    ]
+                  },
+                  "vehiclePlateNumber": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 30
+                  },
+                  "governmentIdType": {
+                    "type": "string",
+                    "enum": [
+                      "NIN",
+                      "DRIVERS_LICENSE",
+                      "VOTERS_CARD",
+                      "INTERNATIONAL_PASSPORT"
+                    ]
+                  },
+                  "governmentIdNumber": {
+                    "type": "string",
+                    "minLength": 6,
+                    "maxLength": 30
+                  },
+                  "bankName": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 100
+                  },
+                  "bankCode": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 20
+                  },
+                  "accountHolderName": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 120
+                  },
+                  "bankAccountNumber": {
+                    "type": "string",
+                    "pattern": "^\\d{10}$"
+                  },
+                  "documents": {
+                    "minItems": 2,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "documentType": {
+                          "type": "string",
+                          "enum": [
+                            "GOVERNMENT_ID",
+                            "DRIVER_LICENSE",
+                            "VEHICLE_REGISTRATION",
+                            "SELFIE"
+                          ]
+                        },
+                        "publicId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 300
+                        }
+                      },
+                      "required": [
+                        "documentType",
+                        "publicId"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "firstName",
+                  "lastName",
+                  "phone",
+                  "operatingCity",
+                  "vehicleType",
+                  "governmentIdType",
+                  "governmentIdNumber",
+                  "bankName",
+                  "accountHolderName",
+                  "bankAccountNumber",
+                  "documents"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "riderProfileId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "userId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "email": {
+                      "type": "string",
+                      "format": "email",
+                      "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "PENDING",
+                        "UNDER_REVIEW",
+                        "APPROVED",
+                        "REJECTED"
+                      ]
+                    },
+                    "riderStatus": {
+                      "type": "string",
+                      "enum": [
+                        "PENDING",
+                        "ACTIVE",
+                        "SUSPENDED",
+                        "DEACTIVATED"
+                      ]
+                    },
+                    "firstName": {
+                      "type": "string"
+                    },
+                    "lastName": {
+                      "type": "string"
+                    },
+                    "phone": {
+                      "type": "string"
+                    },
+                    "operatingCity": {
+                      "type": "string"
+                    },
+                    "homeAddress": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "vehicleType": {
+                      "type": "string"
+                    },
+                    "vehiclePlateNumber": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "governmentIdType": {
+                      "type": "string"
+                    },
+                    "governmentIdMasked": {
+                      "type": "string"
+                    },
+                    "bankName": {
+                      "type": "string"
+                    },
+                    "bankCode": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "accountHolderName": {
+                      "type": "string"
+                    },
+                    "bankAccountMasked": {
+                      "type": "string"
+                    },
+                    "submittedAt": {
+                      "type": "string"
+                    },
+                    "reviewedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "rejectionReason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "reviewNotes": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "documents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "documentType": {
+                            "type": "string",
+                            "enum": [
+                              "GOVERNMENT_ID",
+                              "DRIVER_LICENSE",
+                              "VEHICLE_REGISTRATION",
+                              "SELFIE"
+                            ]
+                          },
+                          "publicId": {
+                            "type": "string"
+                          },
+                          "resourceType": {
+                            "type": "string"
+                          },
+                          "deliveryType": {
+                            "type": "string"
+                          },
+                          "format": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "bytes": {
+                            "anyOf": [
+                              {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "signedAccessUrl": {
+                            "type": "string"
+                          },
+                          "verifiedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "documentType",
+                          "publicId",
+                          "resourceType",
+                          "deliveryType",
+                          "signedAccessUrl"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "riderProfileId",
+                    "status",
+                    "riderStatus",
+                    "firstName",
+                    "lastName",
+                    "phone",
+                    "operatingCity",
+                    "vehicleType",
+                    "governmentIdType",
+                    "governmentIdMasked",
+                    "bankName",
+                    "accountHolderName",
+                    "bankAccountMasked",
+                    "submittedAt",
+                    "documents"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/riders/status": {
+      "patch": {
+        "tags": [
+          "Delivery",
+          "Riders"
+        ],
+        "description": "Toggle rider online/offline availability status with GPS coordinates when going online",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "isOnline": {
+                    "type": "boolean"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ACTIVE",
+                      "DEACTIVATED"
+                    ]
+                  },
+                  "latitude": {
+                    "type": "number",
+                    "minimum": -90,
+                    "maximum": 90
+                  },
+                  "longitude": {
+                    "type": "number",
+                    "minimum": -180,
+                    "maximum": 180
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "PENDING",
+                        "ACTIVE",
+                        "SUSPENDED",
+                        "DEACTIVATED"
+                      ]
+                    },
+                    "isOnline": {
+                      "type": "boolean"
+                    },
+                    "isAvailable": {
+                      "type": "boolean"
+                    },
+                    "lastLatitude": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "lastLongitude": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "lastLocationUpdatedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "isOnline",
+                    "isAvailable"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/riders/location": {
+      "patch": {
+        "tags": [
+          "Delivery",
+          "Riders"
+        ],
+        "description": "Update authenticated rider live GPS coordinates",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "latitude": {
+                    "type": "number",
+                    "minimum": -90,
+                    "maximum": 90
+                  },
+                  "longitude": {
+                    "type": "number",
+                    "minimum": -180,
+                    "maximum": 180
+                  }
+                },
+                "required": [
+                  "latitude",
+                  "longitude"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "PENDING",
+                        "ACTIVE",
+                        "SUSPENDED",
+                        "DEACTIVATED"
+                      ]
+                    },
+                    "isOnline": {
+                      "type": "boolean"
+                    },
+                    "isAvailable": {
+                      "type": "boolean"
+                    },
+                    "lastLatitude": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "lastLongitude": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "lastLocationUpdatedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "isOnline",
+                    "isAvailable"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           }
         }
       }
@@ -6453,7 +7581,7 @@
         "tags": [
           "Delivery"
         ],
-        "description": "List available delivery assignments for riders",
+        "description": "List available delivery assignments for active approved riders",
         "security": [
           {
             "bearerAuth": []
@@ -6461,7 +7589,384 @@
         ],
         "responses": {
           "200": {
-            "description": "Default Response"
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "orderId": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "orderNumber": {
+                        "type": "string"
+                      },
+                      "restaurantName": {
+                        "type": "string"
+                      },
+                      "restaurantAddress": {
+                        "type": "string"
+                      },
+                      "deliveryAddressText": {
+                        "type": "string"
+                      },
+                      "distanceKm": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "riderEarningsMinor": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "riderEarningsFormatted": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "assignedAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "pickedUpAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "deliveredAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "orderId",
+                      "orderNumber",
+                      "restaurantName",
+                      "restaurantAddress",
+                      "deliveryAddressText",
+                      "riderEarningsMinor",
+                      "riderEarningsFormatted",
+                      "status",
+                      "createdAt"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/riders/deliveries/active": {
+      "get": {
+        "tags": [
+          "Delivery",
+          "Riders"
+        ],
+        "description": "Get currently active delivery assignment for authenticated rider",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "orderId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        "orderNumber": {
+                          "type": "string"
+                        },
+                        "restaurantName": {
+                          "type": "string"
+                        },
+                        "restaurantAddress": {
+                          "type": "string"
+                        },
+                        "deliveryAddressText": {
+                          "type": "string"
+                        },
+                        "distanceKm": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "riderEarningsMinor": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "riderEarningsFormatted": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "assignedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "pickedUpAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "deliveredAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "orderId",
+                        "orderNumber",
+                        "restaurantName",
+                        "restaurantAddress",
+                        "deliveryAddressText",
+                        "riderEarningsMinor",
+                        "riderEarningsFormatted",
+                        "status",
+                        "createdAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/riders/deliveries/history": {
+      "get": {
+        "tags": [
+          "Delivery",
+          "Riders"
+        ],
+        "description": "Get paginated delivery history and cumulative earnings for authenticated rider",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ASSIGNED",
+                "OUT_FOR_DELIVERY",
+                "DELIVERED"
+              ]
+            },
+            "in": "query",
+            "name": "status",
+            "required": false
+          },
+          {
+            "schema": {
+              "default": 1,
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "in": "query",
+            "name": "page",
+            "required": false
+          },
+          {
+            "schema": {
+              "default": 20,
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 50
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "orderId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "orderNumber": {
+                            "type": "string"
+                          },
+                          "restaurantName": {
+                            "type": "string"
+                          },
+                          "restaurantAddress": {
+                            "type": "string"
+                          },
+                          "deliveryAddressText": {
+                            "type": "string"
+                          },
+                          "distanceKm": {
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "riderEarningsMinor": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "riderEarningsFormatted": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "assignedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "pickedUpAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "deliveredAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "orderId",
+                          "orderNumber",
+                          "restaurantName",
+                          "restaurantAddress",
+                          "deliveryAddressText",
+                          "riderEarningsMinor",
+                          "riderEarningsFormatted",
+                          "status",
+                          "createdAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "page": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "totalPages": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "totalEarningsMinor": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "totalEarningsFormatted": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total",
+                    "page",
+                    "limit",
+                    "totalPages",
+                    "totalEarningsMinor",
+                    "totalEarningsFormatted"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           }
         }
       }
@@ -6472,24 +7977,108 @@
           "Delivery"
         ],
         "description": "Rider accepts a delivery assignment",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
         "parameters": [
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
             },
             "in": "path",
             "name": "deliveryId",
             "required": true
           }
         ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Default Response"
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "orderId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "orderNumber": {
+                      "type": "string"
+                    },
+                    "restaurantName": {
+                      "type": "string"
+                    },
+                    "restaurantAddress": {
+                      "type": "string"
+                    },
+                    "deliveryAddressText": {
+                      "type": "string"
+                    },
+                    "distanceKm": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "riderEarningsMinor": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "riderEarningsFormatted": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "assignedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "pickedUpAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "deliveredAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "orderId",
+                    "orderNumber",
+                    "restaurantName",
+                    "restaurantAddress",
+                    "deliveryAddressText",
+                    "riderEarningsMinor",
+                    "riderEarningsFormatted",
+                    "status",
+                    "createdAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           }
         }
       }
@@ -6500,24 +8089,108 @@
           "Delivery"
         ],
         "description": "Rider confirms food pickup from restaurant",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
         "parameters": [
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
             },
             "in": "path",
             "name": "deliveryId",
             "required": true
           }
         ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Default Response"
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "orderId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "orderNumber": {
+                      "type": "string"
+                    },
+                    "restaurantName": {
+                      "type": "string"
+                    },
+                    "restaurantAddress": {
+                      "type": "string"
+                    },
+                    "deliveryAddressText": {
+                      "type": "string"
+                    },
+                    "distanceKm": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "riderEarningsMinor": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "riderEarningsFormatted": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "assignedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "pickedUpAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "deliveredAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "orderId",
+                    "orderNumber",
+                    "restaurantName",
+                    "restaurantAddress",
+                    "deliveryAddressText",
+                    "riderEarningsMinor",
+                    "riderEarningsFormatted",
+                    "status",
+                    "createdAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           }
         }
       }
@@ -6528,24 +8201,108 @@
           "Delivery"
         ],
         "description": "Rider confirms successful delivery to customer",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
         "parameters": [
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
             },
             "in": "path",
             "name": "deliveryId",
             "required": true
           }
         ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Default Response"
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "orderId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "orderNumber": {
+                      "type": "string"
+                    },
+                    "restaurantName": {
+                      "type": "string"
+                    },
+                    "restaurantAddress": {
+                      "type": "string"
+                    },
+                    "deliveryAddressText": {
+                      "type": "string"
+                    },
+                    "distanceKm": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "riderEarningsMinor": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "riderEarningsFormatted": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "assignedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "pickedUpAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "deliveredAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "orderId",
+                    "orderNumber",
+                    "restaurantName",
+                    "restaurantAddress",
+                    "deliveryAddressText",
+                    "riderEarningsMinor",
+                    "riderEarningsFormatted",
+                    "status",
+                    "createdAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           }
         }
       }
@@ -6556,24 +8313,151 @@
           "Delivery"
         ],
         "description": "Track live delivery status, locations, and rider details",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
         "parameters": [
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
             },
             "in": "path",
             "name": "orderId",
             "required": true
           }
         ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Default Response"
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "orderId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "orderNumber": {
+                      "type": "string"
+                    },
+                    "deliveryStatus": {
+                      "type": "string"
+                    },
+                    "restaurant": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "address": {
+                          "type": "string"
+                        },
+                        "latitude": {
+                          "type": "number"
+                        },
+                        "longitude": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "address",
+                        "latitude",
+                        "longitude"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "destination": {
+                      "type": "object",
+                      "properties": {
+                        "addressText": {
+                          "type": "string"
+                        },
+                        "latitude": {
+                          "type": "number"
+                        },
+                        "longitude": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "addressText",
+                        "latitude",
+                        "longitude"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "rider": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "phone": {
+                              "type": "string"
+                            },
+                            "vehicleType": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "vehiclePlateNumber": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "phone"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "assignedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "pickedUpAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "deliveredAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "orderId",
+                    "orderNumber",
+                    "deliveryStatus",
+                    "restaurant",
+                    "destination"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           }
         }
       }
@@ -6856,6 +8740,1042 @@
         "responses": {
           "200": {
             "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/riders/applications": {
+      "get": {
+        "tags": [
+          "Admin",
+          "Riders"
+        ],
+        "description": "List rider KYC applications for admin review",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "PENDING",
+                "UNDER_REVIEW",
+                "APPROVED",
+                "REJECTED"
+              ]
+            },
+            "in": "query",
+            "name": "status",
+            "required": false
+          },
+          {
+            "schema": {
+              "default": 1,
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "in": "query",
+            "name": "page",
+            "required": false
+          },
+          {
+            "schema": {
+              "default": 20,
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 100
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "riderProfileId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "userId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "email": {
+                            "type": "string",
+                            "format": "email",
+                            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "PENDING",
+                              "UNDER_REVIEW",
+                              "APPROVED",
+                              "REJECTED"
+                            ]
+                          },
+                          "riderStatus": {
+                            "type": "string",
+                            "enum": [
+                              "PENDING",
+                              "ACTIVE",
+                              "SUSPENDED",
+                              "DEACTIVATED"
+                            ]
+                          },
+                          "firstName": {
+                            "type": "string"
+                          },
+                          "lastName": {
+                            "type": "string"
+                          },
+                          "phone": {
+                            "type": "string"
+                          },
+                          "operatingCity": {
+                            "type": "string"
+                          },
+                          "homeAddress": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "vehicleType": {
+                            "type": "string"
+                          },
+                          "vehiclePlateNumber": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "governmentIdType": {
+                            "type": "string"
+                          },
+                          "governmentIdMasked": {
+                            "type": "string"
+                          },
+                          "bankName": {
+                            "type": "string"
+                          },
+                          "bankCode": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "accountHolderName": {
+                            "type": "string"
+                          },
+                          "bankAccountMasked": {
+                            "type": "string"
+                          },
+                          "submittedAt": {
+                            "type": "string"
+                          },
+                          "reviewedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "rejectionReason": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "reviewNotes": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "documents": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "format": "uuid",
+                                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                                },
+                                "documentType": {
+                                  "type": "string",
+                                  "enum": [
+                                    "GOVERNMENT_ID",
+                                    "DRIVER_LICENSE",
+                                    "VEHICLE_REGISTRATION",
+                                    "SELFIE"
+                                  ]
+                                },
+                                "publicId": {
+                                  "type": "string"
+                                },
+                                "resourceType": {
+                                  "type": "string"
+                                },
+                                "deliveryType": {
+                                  "type": "string"
+                                },
+                                "format": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "bytes": {
+                                  "anyOf": [
+                                    {
+                                      "type": "integer",
+                                      "minimum": -9007199254740991,
+                                      "maximum": 9007199254740991
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "signedAccessUrl": {
+                                  "type": "string"
+                                },
+                                "verifiedAt": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "documentType",
+                                "publicId",
+                                "resourceType",
+                                "deliveryType",
+                                "signedAccessUrl"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "riderProfileId",
+                          "status",
+                          "riderStatus",
+                          "firstName",
+                          "lastName",
+                          "phone",
+                          "operatingCity",
+                          "vehicleType",
+                          "governmentIdType",
+                          "governmentIdMasked",
+                          "bankName",
+                          "accountHolderName",
+                          "bankAccountMasked",
+                          "submittedAt",
+                          "documents"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "page": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "totalPages": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total",
+                    "page",
+                    "limit",
+                    "totalPages"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/riders/applications/{id}": {
+      "get": {
+        "tags": [
+          "Admin",
+          "Riders"
+        ],
+        "description": "Get detailed rider KYC application with short-lived signed document URLs",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "riderProfileId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "userId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "email": {
+                      "type": "string",
+                      "format": "email",
+                      "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "PENDING",
+                        "UNDER_REVIEW",
+                        "APPROVED",
+                        "REJECTED"
+                      ]
+                    },
+                    "riderStatus": {
+                      "type": "string",
+                      "enum": [
+                        "PENDING",
+                        "ACTIVE",
+                        "SUSPENDED",
+                        "DEACTIVATED"
+                      ]
+                    },
+                    "firstName": {
+                      "type": "string"
+                    },
+                    "lastName": {
+                      "type": "string"
+                    },
+                    "phone": {
+                      "type": "string"
+                    },
+                    "operatingCity": {
+                      "type": "string"
+                    },
+                    "homeAddress": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "vehicleType": {
+                      "type": "string"
+                    },
+                    "vehiclePlateNumber": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "governmentIdType": {
+                      "type": "string"
+                    },
+                    "governmentIdMasked": {
+                      "type": "string"
+                    },
+                    "bankName": {
+                      "type": "string"
+                    },
+                    "bankCode": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "accountHolderName": {
+                      "type": "string"
+                    },
+                    "bankAccountMasked": {
+                      "type": "string"
+                    },
+                    "submittedAt": {
+                      "type": "string"
+                    },
+                    "reviewedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "rejectionReason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "reviewNotes": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "documents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "documentType": {
+                            "type": "string",
+                            "enum": [
+                              "GOVERNMENT_ID",
+                              "DRIVER_LICENSE",
+                              "VEHICLE_REGISTRATION",
+                              "SELFIE"
+                            ]
+                          },
+                          "publicId": {
+                            "type": "string"
+                          },
+                          "resourceType": {
+                            "type": "string"
+                          },
+                          "deliveryType": {
+                            "type": "string"
+                          },
+                          "format": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "bytes": {
+                            "anyOf": [
+                              {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "signedAccessUrl": {
+                            "type": "string"
+                          },
+                          "verifiedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "documentType",
+                          "publicId",
+                          "resourceType",
+                          "deliveryType",
+                          "signedAccessUrl"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "riderProfileId",
+                    "status",
+                    "riderStatus",
+                    "firstName",
+                    "lastName",
+                    "phone",
+                    "operatingCity",
+                    "vehicleType",
+                    "governmentIdType",
+                    "governmentIdMasked",
+                    "bankName",
+                    "accountHolderName",
+                    "bankAccountMasked",
+                    "submittedAt",
+                    "documents"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/riders/applications/{id}/approve": {
+      "post": {
+        "tags": [
+          "Admin",
+          "Riders"
+        ],
+        "description": "Approve rider KYC application and activate rider profile",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "notes": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "riderProfileId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "userId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "email": {
+                      "type": "string",
+                      "format": "email",
+                      "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "PENDING",
+                        "UNDER_REVIEW",
+                        "APPROVED",
+                        "REJECTED"
+                      ]
+                    },
+                    "riderStatus": {
+                      "type": "string",
+                      "enum": [
+                        "PENDING",
+                        "ACTIVE",
+                        "SUSPENDED",
+                        "DEACTIVATED"
+                      ]
+                    },
+                    "firstName": {
+                      "type": "string"
+                    },
+                    "lastName": {
+                      "type": "string"
+                    },
+                    "phone": {
+                      "type": "string"
+                    },
+                    "operatingCity": {
+                      "type": "string"
+                    },
+                    "homeAddress": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "vehicleType": {
+                      "type": "string"
+                    },
+                    "vehiclePlateNumber": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "governmentIdType": {
+                      "type": "string"
+                    },
+                    "governmentIdMasked": {
+                      "type": "string"
+                    },
+                    "bankName": {
+                      "type": "string"
+                    },
+                    "bankCode": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "accountHolderName": {
+                      "type": "string"
+                    },
+                    "bankAccountMasked": {
+                      "type": "string"
+                    },
+                    "submittedAt": {
+                      "type": "string"
+                    },
+                    "reviewedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "rejectionReason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "reviewNotes": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "documents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "documentType": {
+                            "type": "string",
+                            "enum": [
+                              "GOVERNMENT_ID",
+                              "DRIVER_LICENSE",
+                              "VEHICLE_REGISTRATION",
+                              "SELFIE"
+                            ]
+                          },
+                          "publicId": {
+                            "type": "string"
+                          },
+                          "resourceType": {
+                            "type": "string"
+                          },
+                          "deliveryType": {
+                            "type": "string"
+                          },
+                          "format": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "bytes": {
+                            "anyOf": [
+                              {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "signedAccessUrl": {
+                            "type": "string"
+                          },
+                          "verifiedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "documentType",
+                          "publicId",
+                          "resourceType",
+                          "deliveryType",
+                          "signedAccessUrl"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "riderProfileId",
+                    "status",
+                    "riderStatus",
+                    "firstName",
+                    "lastName",
+                    "phone",
+                    "operatingCity",
+                    "vehicleType",
+                    "governmentIdType",
+                    "governmentIdMasked",
+                    "bankName",
+                    "accountHolderName",
+                    "bankAccountMasked",
+                    "submittedAt",
+                    "documents"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/riders/applications/{id}/reject": {
+      "post": {
+        "tags": [
+          "Admin",
+          "Riders"
+        ],
+        "description": "Reject rider KYC application with review reason",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500
+                  },
+                  "notes": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "riderProfileId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "userId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    "email": {
+                      "type": "string",
+                      "format": "email",
+                      "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "PENDING",
+                        "UNDER_REVIEW",
+                        "APPROVED",
+                        "REJECTED"
+                      ]
+                    },
+                    "riderStatus": {
+                      "type": "string",
+                      "enum": [
+                        "PENDING",
+                        "ACTIVE",
+                        "SUSPENDED",
+                        "DEACTIVATED"
+                      ]
+                    },
+                    "firstName": {
+                      "type": "string"
+                    },
+                    "lastName": {
+                      "type": "string"
+                    },
+                    "phone": {
+                      "type": "string"
+                    },
+                    "operatingCity": {
+                      "type": "string"
+                    },
+                    "homeAddress": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "vehicleType": {
+                      "type": "string"
+                    },
+                    "vehiclePlateNumber": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "governmentIdType": {
+                      "type": "string"
+                    },
+                    "governmentIdMasked": {
+                      "type": "string"
+                    },
+                    "bankName": {
+                      "type": "string"
+                    },
+                    "bankCode": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "accountHolderName": {
+                      "type": "string"
+                    },
+                    "bankAccountMasked": {
+                      "type": "string"
+                    },
+                    "submittedAt": {
+                      "type": "string"
+                    },
+                    "reviewedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "rejectionReason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "reviewNotes": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "documents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                          },
+                          "documentType": {
+                            "type": "string",
+                            "enum": [
+                              "GOVERNMENT_ID",
+                              "DRIVER_LICENSE",
+                              "VEHICLE_REGISTRATION",
+                              "SELFIE"
+                            ]
+                          },
+                          "publicId": {
+                            "type": "string"
+                          },
+                          "resourceType": {
+                            "type": "string"
+                          },
+                          "deliveryType": {
+                            "type": "string"
+                          },
+                          "format": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "bytes": {
+                            "anyOf": [
+                              {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "signedAccessUrl": {
+                            "type": "string"
+                          },
+                          "verifiedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "documentType",
+                          "publicId",
+                          "resourceType",
+                          "deliveryType",
+                          "signedAccessUrl"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "riderProfileId",
+                    "status",
+                    "riderStatus",
+                    "firstName",
+                    "lastName",
+                    "phone",
+                    "operatingCity",
+                    "vehicleType",
+                    "governmentIdType",
+                    "governmentIdMasked",
+                    "bankName",
+                    "accountHolderName",
+                    "bankAccountMasked",
+                    "submittedAt",
+                    "documents"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
           }
         }
       }

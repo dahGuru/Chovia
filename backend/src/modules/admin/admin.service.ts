@@ -124,7 +124,10 @@ export class AdminService {
     const updated = await prisma.$transaction(async (tx) => {
       const r = await tx.riderProfile.update({
         where: { id: riderId },
-        data: { status: dto.status },
+        data: {
+          status: dto.status,
+          ...(dto.status !== "ACTIVE" ? { isOnline: false, isAvailable: false } : {}),
+        },
       });
 
       await tx.auditLog.create({

@@ -259,17 +259,33 @@ export class OrdersService {
 
     if (userRole === "CUSTOMER") {
       const profile = await prisma.customerProfile.findUnique({ where: { userId } });
-      if (!profile) return { items: [], total: 0, page: query.page, limit: query.limit, totalPages: 0 };
+      if (!profile) return { items: [], total: 0, page: query.page, limit: query.limit, totalPages: 1 };
       where.customerId = profile.id;
+    } else if (userRole === "RIDER") {
+      const riderProfile = await prisma.riderProfile.findUnique({ where: { userId } });
+      if (!riderProfile) {
+        return { items: [], total: 0, page: query.page, limit: query.limit, totalPages: 1 };
+      }
+      where.delivery = { is: { riderId: riderProfile.id } };
     } else if (userRole === "RESTAURANT_STAFF") {
+      const memberships = await prisma.restaurantStaffMembership.findMany({
+        where: { userId, status: "ACTIVE" },
+      });
+      const allowedRestaurantIds = memberships.map((m) => m.restaurantId);
       if (query.restaurantId) {
+        if (!allowedRestaurantIds.includes(query.restaurantId)) {
+          throw new ForbiddenError("You are not authorized to list orders for this restaurant");
+        }
         where.restaurantId = query.restaurantId;
       } else {
-        const memberships = await prisma.restaurantStaffMembership.findMany({
-          where: { userId, status: "ACTIVE" },
-        });
-        where.restaurantId = { in: memberships.map((m) => m.restaurantId) };
+        where.restaurantId = { in: allowedRestaurantIds };
       }
+    } else if (userRole === "ADMIN") {
+      if (query.restaurantId) {
+        where.restaurantId = query.restaurantId;
+      }
+    } else {
+      throw new ForbiddenError("Your account role is not authorized to list orders");
     }
 
     const [total, orders] = await Promise.all([
@@ -304,6 +320,7 @@ export class OrdersService {
         items: true,
         restaurant: true,
         payment: true,
+        delivery: true,
         statusHistory: { orderBy: { createdAt: "asc" } },
       },
     });
@@ -317,6 +334,24 @@ export class OrdersService {
       if (!profile || order.customerId !== profile.id) {
         throw new ForbiddenError("You cannot view this order");
       }
+    } else if (userRole === "RIDER") {
+      const riderProfile = await prisma.riderProfile.findUnique({ where: { userId } });
+      if (!riderProfile || order.delivery?.riderId !== riderProfile.id) {
+        throw new ForbiddenError("You cannot view an order not assigned to you");
+      }
+    } else if (userRole === "RESTAURANT_STAFF") {
+      const membership = await prisma.restaurantStaffMembership.findFirst({
+        where: {
+          userId,
+          restaurantId: order.restaurantId,
+          status: "ACTIVE",
+        },
+      });
+      if (!membership) {
+        throw new ForbiddenError("You are not authorized to view orders for this restaurant");
+      }
+    } else if (userRole !== "ADMIN") {
+      throw new ForbiddenError("You are not authorized to view this order");
     }
 
     return serializeOrder(order);
@@ -324,6 +359,7 @@ export class OrdersService {
 
   async cancelOrder(
     userId: string,
+    userRole: string,
     orderId: string,
     dto: CancelOrderRequestDto
   ): Promise<OrderResponseDto> {
@@ -332,7 +368,16 @@ export class OrdersService {
       throw new NotFoundError("Order not found");
     }
 
-    if (order.status !== "PENDING_PAYMENT" && order.status !== "PENDING") {
+    if (userRole === "CUSTOMER") {
+      const profile = await prisma.customerProfile.findUnique({ where: { userId } });
+      if (!profile || order.customerId !== profile.id) {
+        throw new ForbiddenError("You are not authorized to cancel another customer's order");
+      }
+    } else if (userRole !== "ADMIN") {
+      throw new ForbiddenError("Only the ordering customer or an administrator can cancel this order");
+    }
+
+    if (order.status !== "PENDING_PAYMENT" && order.status !== "PENDING" && order.status !== "CONFIRMED") {
       throw new BadRequestError(
         `Order cannot be cancelled in status: ${order.status}. Orders can only be cancelled before preparation begins.`
       );

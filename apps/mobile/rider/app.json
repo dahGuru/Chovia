@@ -7,7 +7,19 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "plugins": ["expo-router", "expo-status-bar", "expo-font"],
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      "expo-font",
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "CHOVIA Rider uses your location to verify your operating zone and dispatch nearby delivery orders while you are online."
+        }
+      ],
+      "expo-document-picker"
+    ],
     "experiments": {
       "typedRoutes": true
     }

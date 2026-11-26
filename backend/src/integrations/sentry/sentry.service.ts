@@ -25,8 +25,13 @@ export const SENSITIVE_KEYS = new Set([
   "pan",
   "pin",
   "accountnumber",
+  "bankaccountnumber",
+  "governmentidnumber",
+  "nationalidnumber",
+  "idnumber",
   "bvn",
   "nin",
+  "kycencryptionkey",
 ]);
 
 /**
@@ -68,8 +73,9 @@ export function sanitizeString(val: string): string {
 /**
  * Pure, non-mutating deep sanitizer that scrubs sensitive credentials,
  * tokens, passwords, OTPs, and financial data from event payloads.
+ * Employs bounded recursion (max depth 10) and a WeakSet visited tracker to prevent circular reference stack overflows.
  */
-export function scrubData(data: unknown): unknown {
+export function scrubData(data: unknown, depth = 0, visited = new WeakSet<object>()): unknown {
   if (data === null || data === undefined) {
     return data;
   }
@@ -82,8 +88,17 @@ export function scrubData(data: unknown): unknown {
     return data;
   }
 
+  if (depth >= 10) {
+    return "[MAX_DEPTH_EXCEEDED]";
+  }
+
+  if (visited.has(data)) {
+    return "[CIRCULAR]";
+  }
+  visited.add(data);
+
   if (Array.isArray(data)) {
-    return data.map((item) => scrubData(item));
+    return data.map((item) => scrubData(item, depth + 1, visited));
   }
 
   const clean: Record<string, unknown> = {};
@@ -96,7 +111,7 @@ export function scrubData(data: unknown): unknown {
     if (isSensitive) {
       clean[key] = "[REDACTED]";
     } else if (typeof value === "object" && value !== null) {
-      clean[key] = scrubData(value);
+      clean[key] = scrubData(value, depth + 1, visited);
     } else if (typeof value === "string") {
       clean[key] = sanitizeString(value);
     } else {

@@ -1,8 +1,83 @@
+import dns from "node:dns/promises";
+import net from "node:net";
 import { v2 as cloudinary, type UploadApiOptions } from "cloudinary";
 import { env } from "../../config/env.js";
 import { BadRequestError, NotFoundError, PaymentGatewayError } from "../../common/errors/api-error.js";
 
 export type AllowedFolder = "menu" | "restaurants" | "avatars" | "documents";
+
+export function isPrivateOrBlockedIp(ipStr: string): boolean {
+  let ip = ipStr.toLowerCase();
+
+  // Normalize IPv4-mapped IPv6 addresses: ::ffff:192.0.2.1 -> 192.0.2.1
+  if (ip.startsWith("::ffff:")) {
+    const candidate = ip.slice(7);
+    if (net.isIPv4(candidate)) {
+      ip = candidate;
+    }
+  }
+
+  const ipVersion = net.isIP(ip);
+  if (ipVersion === 0) {
+    return true; // Not a valid IP
+  }
+
+  if (ipVersion === 4) {
+    const parts = ip.split(".").map(Number);
+    if (parts.length !== 4) return true;
+    const [b0, b1, b2, b3] = parts;
+    if (b0 === undefined || b1 === undefined || b2 === undefined || b3 === undefined) return true;
+
+    // 0.0.0.0/8 (Current network)
+    if (b0 === 0) return true;
+
+    // 127.0.0.0/8 (Loopback)
+    if (b0 === 127) return true;
+
+    // 10.0.0.0/8 (Private)
+    if (b0 === 10) return true;
+
+    // 172.16.0.0/12 (Private: 172.16.0.0 - 172.31.255.255)
+    if (b0 === 172 && b1 >= 16 && b1 <= 31) return true;
+
+    // 192.168.0.0/16 (Private)
+    if (b0 === 192 && b1 === 168) return true;
+
+    // 169.254.0.0/16 (Link-local / Cloud metadata: 169.254.169.254)
+    if (b0 === 169 && b1 === 254) return true;
+
+    // 100.64.0.0/10 (Carrier-grade NAT: 100.64.0.0 - 100.127.255.255)
+    if (b0 === 100 && b1 >= 64 && b1 <= 127) return true;
+
+    // Documentation / TEST-NET: 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24
+    if (b0 === 192 && b1 === 0 && b2 === 2) return true;
+    if (b0 === 198 && b1 === 51 && b2 === 100) return true;
+    if (b0 === 203 && b1 === 0 && b2 === 113) return true;
+
+    // Broadcast & Reserved (224.0.0.0/4 multicast, 240.0.0.0/4 reserved, 255.255.255.255)
+    if (b0 >= 224) return true;
+
+    return false;
+  }
+
+  if (ipVersion === 6) {
+    // Loopback ::1
+    if (ip === "::1" || ip === "0:0:0:0:0:0:0:1") return true;
+
+    // Unspecified ::
+    if (ip === "::" || ip === "0:0:0:0:0:0:0:0") return true;
+
+    // Link-local: fe80::/10 (fe80 to febf)
+    if (/^fe[89ab][0-9a-f]:/i.test(ip) || ip.startsWith("fe80:")) return true;
+
+    // Unique Local Address (ULA): fc00::/7 (fc00 to fdff)
+    if (/^f[cd][0-9a-f]{2}:/i.test(ip) || ip.startsWith("fc") || ip.startsWith("fd")) return true;
+
+    return false;
+  }
+
+  return true;
+}
 
 export interface UploadPolicy {
   folder: AllowedFolder;
@@ -10,6 +85,7 @@ export interface UploadPolicy {
   allowedMimeTypes: string[];
   allowedFormats: string[];
   resourceType: "image" | "auto" | "raw";
+  deliveryType: "upload" | "authenticated";
 }
 
 export const UPLOAD_POLICIES: Record<AllowedFolder, UploadPolicy> = {
@@ -19,6 +95,7 @@ export const UPLOAD_POLICIES: Record<AllowedFolder, UploadPolicy> = {
     allowedMimeTypes: ["image/jpeg", "image/png", "image/webp"],
     allowedFormats: ["jpg", "jpeg", "png", "webp"],
     resourceType: "image",
+    deliveryType: "upload",
   },
   menu: {
     folder: "menu",
@@ -26,6 +103,7 @@ export const UPLOAD_POLICIES: Record<AllowedFolder, UploadPolicy> = {
     allowedMimeTypes: ["image/jpeg", "image/png", "image/webp"],
     allowedFormats: ["jpg", "jpeg", "png", "webp"],
     resourceType: "image",
+    deliveryType: "upload",
   },
   restaurants: {
     folder: "restaurants",
@@ -33,6 +111,7 @@ export const UPLOAD_POLICIES: Record<AllowedFolder, UploadPolicy> = {
     allowedMimeTypes: ["image/jpeg", "image/png", "image/webp"],
     allowedFormats: ["jpg", "jpeg", "png", "webp"],
     resourceType: "image",
+    deliveryType: "upload",
   },
   documents: {
     folder: "documents",
@@ -40,6 +119,7 @@ export const UPLOAD_POLICIES: Record<AllowedFolder, UploadPolicy> = {
     allowedMimeTypes: ["image/jpeg", "image/png", "application/pdf"],
     allowedFormats: ["jpg", "jpeg", "png", "pdf"],
     resourceType: "auto",
+    deliveryType: "authenticated",
   },
 };
 
@@ -52,12 +132,14 @@ export interface UploadSignatureResult {
   allowedFormats: string[];
   maxFileSize: number;
   resourceType: string;
+  deliveryType: "upload" | "authenticated";
   publicId?: string | undefined;
 }
 
 export interface CloudinaryUploadResult {
   publicId: string;
   secureUrl: string;
+  deliveryType?: "upload" | "authenticated" | undefined;
   width?: number | undefined;
   height?: number | undefined;
   format?: string | undefined;
@@ -204,6 +286,9 @@ export class CloudinaryService {
       timestamp,
     };
 
+    if (policy.deliveryType === "authenticated") {
+      paramsToSign["type"] = "authenticated";
+    }
     if (customPublicId) {
       paramsToSign["public_id"] = customPublicId;
     }
@@ -221,6 +306,7 @@ export class CloudinaryService {
         allowedFormats: policy.allowedFormats,
         maxFileSize: policy.maxSizeBytes,
         resourceType: policy.resourceType,
+        deliveryType: policy.deliveryType,
         ...(customPublicId ? { publicId: customPublicId } : {}),
       };
     }
@@ -239,11 +325,12 @@ export class CloudinaryService {
       allowedFormats: policy.allowedFormats,
       maxFileSize: policy.maxSizeBytes,
       resourceType: policy.resourceType,
+      deliveryType: policy.deliveryType,
       ...(customPublicId ? { publicId: customPublicId } : {}),
     };
   }
 
-  validateRemoteUrl(urlStr: string): void {
+  async validateRemoteUrl(urlStr: string): Promise<void> {
     let url: URL;
     try {
       url = new URL(urlStr);
@@ -265,12 +352,59 @@ export class CloudinaryService {
       hostname === "metadata.google.internal" ||
       hostname.endsWith(".internal") ||
       hostname.endsWith(".local") ||
+      hostname.endsWith(".localhost") ||
       /^10\./.test(hostname) ||
       /^192\.168\./.test(hostname) ||
       /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname)
     ) {
       throw new BadRequestError("Remote upload URLs targeting internal, loopback, or metadata services are forbidden");
     }
+
+    if (net.isIP(hostname)) {
+      if (isPrivateOrBlockedIp(hostname)) {
+        throw new BadRequestError("Remote upload URLs targeting internal, loopback, or metadata services are forbidden");
+      }
+    } else {
+      try {
+        const addresses = await dns.lookup(hostname, { all: true });
+        if (!addresses || addresses.length === 0) {
+          throw new BadRequestError("Remote upload URL domain could not be resolved");
+        }
+
+        for (const entry of addresses) {
+          if (isPrivateOrBlockedIp(entry.address)) {
+            throw new BadRequestError(
+              `Remote upload URLs resolving to internal or private addresses (${entry.address}) are forbidden`
+            );
+          }
+        }
+      } catch (err: unknown) {
+        if (err instanceof BadRequestError) throw err;
+        throw new BadRequestError(
+          `Unable to resolve remote image host "${hostname}": ${err instanceof Error ? err.message : "DNS resolution failure"}`
+        );
+      }
+    }
+  }
+
+  generateSignedAssetUrl(
+    publicId: string,
+    resourceType: string = "image",
+    format?: string,
+    expiresInSeconds = 600
+  ): string {
+    const expiresAt = Math.floor(Date.now() / 1000) + expiresInSeconds;
+    const resolvedResourceType = resourceType === "auto" ? "image" : resourceType;
+
+    if (this.isMock) {
+      return `https://api.cloudinary.com/v1_1/chovia-mock/${resolvedResourceType}/download?public_id=${encodeURIComponent(publicId)}&type=authenticated&expires_at=${expiresAt}&signature=mock_signed_${expiresAt}`;
+    }
+
+    return cloudinary.utils.private_download_url(publicId, format || "", {
+      resource_type: resolvedResourceType,
+      type: "authenticated",
+      expires_at: expiresAt,
+    });
   }
 
   async verifyAssetWithProvider(
@@ -290,20 +424,38 @@ export class CloudinaryService {
       );
     }
 
-    // Prevent cross-user asset claims for user-scoped resources (e.g. avatars)
-    if (folder === "avatars" && expectedUserId && !publicId.includes(expectedUserId)) {
-      throw new BadRequestError(
-        `Unauthorized asset claim: publicId "${publicId}" does not belong to authenticated user.`
-      );
+    // Prevent cross-user asset claims for user-scoped resources (avatars & KYC documents) using exact segment matching
+    if ((folder === "avatars" || folder === "documents") && expectedUserId) {
+      const relativePath = publicId.slice(expectedPrefix.length);
+      const segments = relativePath.split("/");
+      const filename = segments[segments.length - 1] ?? "";
+      const isOwner =
+        segments[0] === expectedUserId ||
+        filename.startsWith(`${expectedUserId}_`) ||
+        filename === expectedUserId;
+
+      if (!isOwner) {
+        throw new BadRequestError(
+          `Unauthorized asset claim: publicId "${publicId}" does not belong to authenticated user.`
+        );
+      }
     }
 
     if (this.isMock) {
+      const mockResourceType = policy.resourceType === "auto" ? "image" : policy.resourceType;
+      const mockFormat = policy.allowedFormats.includes("webp")
+        ? "webp"
+        : (policy.allowedFormats[0] ?? "png");
       const mockResult: CloudinaryUploadResult = {
         publicId,
-        secureUrl: `https://res.cloudinary.com/chovia/${policy.resourceType}/upload/v1/${publicId}.webp`,
-        format: "webp",
+        secureUrl:
+          policy.deliveryType === "authenticated"
+            ? this.generateSignedAssetUrl(publicId, mockResourceType, mockFormat)
+            : `https://res.cloudinary.com/chovia/${policy.resourceType}/upload/v1/${publicId}.${mockFormat}`,
+        deliveryType: policy.deliveryType,
+        format: mockFormat,
         bytes: 102400,
-        resourceType: policy.resourceType,
+        resourceType: mockResourceType,
         width: 800,
         height: 600,
       };
@@ -311,28 +463,44 @@ export class CloudinaryService {
       return mockResult;
     }
 
-    let resource: Record<string, unknown>;
-    try {
-      resource = (await cloudinary.api.resource(publicId, {
-        resource_type: policy.resourceType === "auto" ? "image" : policy.resourceType,
-      })) as Record<string, unknown>;
-    } catch (err: unknown) {
-      const errorObj = err as { http_code?: number; error?: { http_code?: number } };
-      const statusCode = errorObj.http_code || errorObj.error?.http_code;
-      if (statusCode === 404) {
-        throw new NotFoundError(`Asset "${publicId}" does not exist on Cloudinary.`);
+    let resource: Record<string, unknown> | undefined;
+    const candidateResourceTypes =
+      policy.resourceType === "auto" ? ["image", "raw"] : [policy.resourceType];
+
+    for (const candidateType of candidateResourceTypes) {
+      try {
+        resource = (await cloudinary.api.resource(publicId, {
+          resource_type: candidateType,
+          type: policy.deliveryType,
+        })) as Record<string, unknown>;
+        break;
+      } catch (err: unknown) {
+        const errorObj = err as { http_code?: number; error?: { http_code?: number } };
+        const statusCode = errorObj.http_code || errorObj.error?.http_code;
+        if (statusCode === 404) {
+          continue;
+        }
+        const message = err instanceof Error ? err.message : "Cloudinary asset lookup failed";
+        throw new PaymentGatewayError(`Cloudinary asset verification error: ${message}`);
       }
-      const message = err instanceof Error ? err.message : "Cloudinary asset lookup failed";
-      throw new PaymentGatewayError(`Cloudinary asset verification error: ${message}`);
     }
 
     if (!resource) {
-      throw new NotFoundError(`Asset "${publicId}" was not found.`);
+      throw new NotFoundError(`Asset "${publicId}" does not exist on Cloudinary.`);
+    }
+
+    const actualType = typeof resource["type"] === "string" ? resource["type"] : "upload";
+    if (policy.deliveryType === "authenticated" && actualType !== "authenticated") {
+      throw new BadRequestError(
+        `Asset "${publicId}" must use authenticated private delivery storage.`
+      );
     }
 
     const actualBytes = Number(resource["bytes"]);
-    const actualFormat = typeof resource["format"] === "string" ? resource["format"].toLowerCase() : undefined;
-    const actualResourceType = typeof resource["resource_type"] === "string" ? resource["resource_type"] : undefined;
+    const actualFormat =
+      typeof resource["format"] === "string" ? resource["format"].toLowerCase() : undefined;
+    const actualResourceType =
+      typeof resource["resource_type"] === "string" ? resource["resource_type"] : undefined;
 
     // Verify actual byte size and format from provider metadata (never trust client claims)
     this.verifyUploadResponse(folder, {
@@ -342,9 +510,16 @@ export class CloudinaryService {
       resourceType: actualResourceType,
     });
 
+    const verifiedPublicId = String(resource["public_id"]);
+    const secureUrl =
+      policy.deliveryType === "authenticated"
+        ? this.generateSignedAssetUrl(verifiedPublicId, actualResourceType || "image", actualFormat)
+        : String(resource["secure_url"]);
+
     return {
-      publicId: String(resource["public_id"]),
-      secureUrl: String(resource["secure_url"]),
+      publicId: verifiedPublicId,
+      secureUrl,
+      deliveryType: policy.deliveryType,
       format: actualFormat,
       bytes: actualBytes,
       resourceType: actualResourceType,
@@ -396,6 +571,8 @@ export class CloudinaryService {
       throw new BadRequestError(`Invalid upload folder "${folder}".`);
     }
 
+    let detectedFormat: string | undefined;
+
     // Inspect actual byte payload for base64 uploads
     if (fileInput.startsWith("data:") || !fileInput.startsWith("http")) {
       const base64Data = fileInput.includes(",") ? fileInput.split(",")[1] : fileInput;
@@ -420,22 +597,39 @@ export class CloudinaryService {
             `File format "${detected.format}" is not allowed for category "${folder}". Allowed: ${policy.allowedFormats.join(", ")}`
           );
         }
+
+        detectedFormat = detected.format;
       }
     } else {
       // Validate remote URL against SSRF and require HTTPS
-      this.validateRemoteUrl(fileInput);
+      await this.validateRemoteUrl(fileInput);
     }
 
     if (this.isMock) {
       const generatedId = publicId || `mock_${Date.now()}`;
+      const resolvedPublicId = `chovia/${folder}/${generatedId}`;
+      const fallbackFormat = policy.allowedFormats.includes("webp")
+        ? "webp"
+        : (policy.allowedFormats[0] ?? "png");
+      const resolvedFormat = detectedFormat || fallbackFormat;
+      const resolvedResourceType =
+        resolvedFormat === "pdf"
+          ? "raw"
+          : policy.resourceType === "auto"
+            ? "image"
+            : policy.resourceType;
       const mockResult: CloudinaryUploadResult = {
-        publicId: `chovia/${folder}/${generatedId}`,
-        secureUrl: `https://res.cloudinary.com/chovia/${policy.resourceType}/upload/v1/chovia/${folder}/${generatedId}.webp`,
-        format: "webp",
-        width: 800,
-        height: 600,
+        publicId: resolvedPublicId,
+        secureUrl:
+          policy.deliveryType === "authenticated"
+            ? this.generateSignedAssetUrl(resolvedPublicId, resolvedResourceType, resolvedFormat)
+            : `https://res.cloudinary.com/chovia/${policy.resourceType}/upload/v1/${resolvedPublicId}.${resolvedFormat}`,
+        deliveryType: policy.deliveryType,
+        format: resolvedFormat,
+        width: resolvedResourceType === "image" ? 800 : undefined,
+        height: resolvedResourceType === "image" ? 600 : undefined,
         bytes: 102400,
-        resourceType: policy.resourceType,
+        resourceType: resolvedResourceType,
       };
       this.verifyUploadResponse(folder, mockResult);
       return mockResult;
@@ -445,6 +639,7 @@ export class CloudinaryService {
       const uploadOptions: UploadApiOptions = {
         folder: `chovia/${folder}`,
         resource_type: policy.resourceType,
+        type: policy.deliveryType,
         allowed_formats: policy.allowedFormats,
         overwrite: false,
       };
@@ -456,7 +651,11 @@ export class CloudinaryService {
 
       const uploadResult: CloudinaryUploadResult = {
         publicId: result.public_id,
-        secureUrl: result.secure_url,
+        secureUrl:
+          policy.deliveryType === "authenticated"
+            ? this.generateSignedAssetUrl(result.public_id, result.resource_type, result.format)
+            : result.secure_url,
+        deliveryType: policy.deliveryType,
         width: result.width,
         height: result.height,
         format: result.format,

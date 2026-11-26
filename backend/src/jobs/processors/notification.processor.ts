@@ -10,7 +10,7 @@ export async function processNotificationJob(job: Job): Promise<void> {
     const data = job.data as SendPushNotificationJobData;
 
     // 1. Idempotency check: avoid duplicate in-app notification records for the same event
-    const existing = await prisma.notification.findFirst({
+    let notification = await prisma.notification.findFirst({
       where: {
         userId: data.userId,
         title: data.title,
@@ -18,8 +18,8 @@ export async function processNotificationJob(job: Job): Promise<void> {
       },
     });
 
-    if (!existing) {
-      await prisma.notification.create({
+    if (!notification) {
+      notification = await prisma.notification.create({
         data: {
           userId: data.userId,
           type: "SYSTEM",
@@ -35,19 +35,80 @@ export async function processNotificationJob(job: Job): Promise<void> {
       where: { userId: data.userId, isActive: true },
     });
 
-    if (devices.length > 0) {
-      const validPushMessages = devices
-        .filter((d) => isExpoPushToken(d.expoPushToken))
-        .map((d) => ({
-          to: d.expoPushToken,
-          title: data.title,
-          body: data.body,
-          data: data.data,
-          sound: "default" as const,
-        }));
+    if (devices.length > 0 && notification) {
+      const validDevices = devices.filter((d) => isExpoPushToken(d.expoPushToken));
 
-      if (validPushMessages.length > 0) {
-        await expoPushService.sendPushNotifications(validPushMessages);
+      for (const device of validDevices) {
+        // Persist QUEUED delivery record if not already created
+        let delivery = await prisma.notificationDelivery.findFirst({
+          where: {
+            notificationId: notification.id,
+            deviceId: device.id,
+          },
+        });
+
+        if (!delivery) {
+          delivery = await prisma.notificationDelivery.create({
+            data: {
+              notificationId: notification.id,
+              deviceId: device.id,
+              expoPushToken: device.expoPushToken,
+              status: "QUEUED",
+            },
+          });
+        }
+
+        // If already delivered or submitted, don't resend
+        if (delivery.status === "DELIVERED" || delivery.status === "SUBMITTED") {
+          continue;
+        }
+
+        try {
+          const tickets = await expoPushService.sendPushNotifications([
+            {
+              to: device.expoPushToken,
+              title: data.title,
+              body: data.body,
+              data: data.data,
+              sound: "default" as const,
+            },
+          ]);
+
+          const ticket = tickets[0];
+          if (ticket && ticket.status === "ok") {
+            await prisma.notificationDelivery.update({
+              where: { id: delivery.id },
+              data: {
+                status: "SUBMITTED",
+                ticketId: ticket.id ?? null,
+                submittedAt: new Date(),
+              },
+            });
+          } else if (ticket && ticket.status === "error") {
+            await prisma.notificationDelivery.update({
+              where: { id: delivery.id },
+              data: {
+                status: "FAILED",
+                errorMessage: ticket.message || (ticket.details?.error ? String(ticket.details.error) : "Ticket error"),
+                failedAt: new Date(),
+              },
+            });
+
+            if (ticket.details?.error === "DeviceNotRegistered") {
+              await expoPushService.deactivateInvalidToken(device.expoPushToken);
+            }
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Push submission error";
+          await prisma.notificationDelivery.update({
+            where: { id: delivery.id },
+            data: {
+              status: "FAILED",
+              errorMessage,
+              failedAt: new Date(),
+            },
+          });
+        }
       }
     }
   }

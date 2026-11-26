@@ -166,6 +166,18 @@ describe("Opaque BullMQ Job IDs & PII Protection", () => {
     expect(inviteJobId).not.toContain(rawToken);
     expect(inviteJobId).not.toContain(rawEmail);
   });
+
+  it("should prevent delimiter injection collisions using length-prefixed canonical encoding", () => {
+    // Delimiter injection: ["a:b", "c"] vs ["a", "b:c"]
+    const id1 = createOpaqueJobId("test", "a:b", "c");
+    const id2 = createOpaqueJobId("test", "a", "b:c");
+    expect(id1).not.toBe(id2);
+
+    // Stable deterministic ID across runs without timestamps
+    const stable1 = createOpaqueJobId("email_verify", "user@chovia.app", "123456");
+    const stable2 = createOpaqueJobId("email_verify", "user@chovia.app", "123456");
+    expect(stable1).toBe(stable2);
+  });
 });
 
 describe("Transactional Outbox Dispatcher (Atomic Claim, Dispatch, Retry)", () => {
@@ -207,8 +219,7 @@ describe("Transactional Outbox Dispatcher (Atomic Claim, Dispatch, Retry)", () =
     ];
 
     const findManySpy = vi.spyOn(prisma.outboxEvent, "findMany").mockResolvedValueOnce(pendingEvents as any);
-    const updateManySpy = vi.spyOn(prisma.outboxEvent, "updateMany").mockResolvedValueOnce({ count: 1 });
-    const updateSpy = vi.spyOn(prisma.outboxEvent, "update").mockResolvedValueOnce({} as any);
+    const updateManySpy = vi.spyOn(prisma.outboxEvent, "updateMany").mockResolvedValue({ count: 1 });
 
     const queueMod = await import("../jobs/queues/index.js");
     const enqueueSpy = vi.spyOn(queueMod, "enqueuePushNotification").mockResolvedValueOnce();
@@ -217,16 +228,15 @@ describe("Transactional Outbox Dispatcher (Atomic Claim, Dispatch, Retry)", () =
       const dispatched = await outboxDispatcher.dispatchPendingEvents();
       expect(dispatched).toBe(1);
       expect(enqueueSpy).toHaveBeenCalled();
-      expect(updateSpy).toHaveBeenCalledWith(
+      expect(updateManySpy).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: "evt_1" },
+          where: expect.objectContaining({ id: "evt_1", status: "PROCESSING" }),
           data: expect.objectContaining({ status: "DISPATCHED" }),
         })
       );
     } finally {
       findManySpy.mockRestore();
       updateManySpy.mockRestore();
-      updateSpy.mockRestore();
       enqueueSpy.mockRestore();
     }
   });
@@ -243,8 +253,7 @@ describe("Transactional Outbox Dispatcher (Atomic Claim, Dispatch, Retry)", () =
     ];
 
     const findManySpy = vi.spyOn(prisma.outboxEvent, "findMany").mockResolvedValueOnce(pendingEvents as any);
-    const updateManySpy = vi.spyOn(prisma.outboxEvent, "updateMany").mockResolvedValueOnce({ count: 1 });
-    const updateSpy = vi.spyOn(prisma.outboxEvent, "update").mockResolvedValueOnce({} as any);
+    const updateManySpy = vi.spyOn(prisma.outboxEvent, "updateMany").mockResolvedValue({ count: 1 });
 
     const queueMod = await import("../jobs/queues/index.js");
     const enqueueSpy = vi.spyOn(queueMod, "enqueuePushNotification").mockRejectedValueOnce(new Error("Redis connection refused"));
@@ -252,9 +261,9 @@ describe("Transactional Outbox Dispatcher (Atomic Claim, Dispatch, Retry)", () =
     try {
       const dispatched = await outboxDispatcher.dispatchPendingEvents();
       expect(dispatched).toBe(0);
-      expect(updateSpy).toHaveBeenCalledWith(
+      expect(updateManySpy).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: "evt_fail" },
+          where: expect.objectContaining({ id: "evt_fail", status: "PROCESSING" }),
           data: expect.objectContaining({
             status: "PENDING",
             lastError: "Redis connection refused",
@@ -264,7 +273,72 @@ describe("Transactional Outbox Dispatcher (Atomic Claim, Dispatch, Retry)", () =
     } finally {
       findManySpy.mockRestore();
       updateManySpy.mockRestore();
-      updateSpy.mockRestore();
+      enqueueSpy.mockRestore();
+    }
+  });
+
+  it("should generate claimToken and leaseExpiresAt during atomic claim", async () => {
+    const pendingEvents = [
+      {
+        id: "evt_lease_test",
+        eventType: "ORDER_CONFIRMED_NOTIFICATION",
+        payload: { userId: "usr_lease", title: "Lease", body: "Checking claimToken" },
+        attempts: 0,
+        status: "PENDING",
+      },
+    ];
+
+    const findManySpy = vi.spyOn(prisma.outboxEvent, "findMany").mockResolvedValueOnce(pendingEvents as any);
+    const updateManySpy = vi.spyOn(prisma.outboxEvent, "updateMany").mockResolvedValue({ count: 1 });
+
+    const queueMod = await import("../jobs/queues/index.js");
+    const enqueueSpy = vi.spyOn(queueMod, "enqueuePushNotification").mockResolvedValueOnce();
+
+    try {
+      await outboxDispatcher.dispatchPendingEvents();
+      expect(updateManySpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "evt_lease_test", status: "PENDING" },
+          data: expect.objectContaining({
+            status: "PROCESSING",
+            attempts: { increment: 1 },
+            claimToken: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/),
+            leaseExpiresAt: expect.any(Date),
+          }),
+        })
+      );
+    } finally {
+      findManySpy.mockRestore();
+      updateManySpy.mockRestore();
+      enqueueSpy.mockRestore();
+    }
+  });
+
+  it("should abort completion if lease expired and claimToken was lost (markResult count = 0)", async () => {
+    const pendingEvents = [
+      {
+        id: "evt_lost_lease",
+        eventType: "ORDER_CONFIRMED_NOTIFICATION",
+        payload: { userId: "usr_lost", title: "Lost", body: "Lease lost" },
+        attempts: 0,
+        status: "PENDING",
+      },
+    ];
+
+    const findManySpy = vi.spyOn(prisma.outboxEvent, "findMany").mockResolvedValueOnce(pendingEvents as any);
+    const updateManySpy = vi.spyOn(prisma.outboxEvent, "updateMany")
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+
+    const queueMod = await import("../jobs/queues/index.js");
+    const enqueueSpy = vi.spyOn(queueMod, "enqueuePushNotification").mockResolvedValueOnce();
+
+    try {
+      const dispatched = await outboxDispatcher.dispatchPendingEvents();
+      expect(dispatched).toBe(0);
+    } finally {
+      findManySpy.mockRestore();
+      updateManySpy.mockRestore();
       enqueueSpy.mockRestore();
     }
   });
@@ -386,6 +460,9 @@ describe("Delivery Dispatch Processor & Rider Lifecycle Constraints", () => {
         userId: "usr_r1",
         firstName: "Stale",
         lastName: "Rider",
+        status: "ACTIVE",
+        isOnline: true,
+        isAvailable: true,
         lastLatitude: 6.525,
         lastLongitude: 3.38,
         lastLocationUpdatedAt: staleTime,
@@ -395,6 +472,9 @@ describe("Delivery Dispatch Processor & Rider Lifecycle Constraints", () => {
         userId: "usr_r2",
         firstName: "Far",
         lastName: "Rider",
+        status: "ACTIVE",
+        isOnline: true,
+        isAvailable: true,
         lastLatitude: 6.9, // > 40km away
         lastLongitude: 3.8,
         lastLocationUpdatedAt: freshTime,
@@ -404,6 +484,9 @@ describe("Delivery Dispatch Processor & Rider Lifecycle Constraints", () => {
         userId: "usr_r3",
         firstName: "Eligible",
         lastName: "Rider",
+        status: "ACTIVE",
+        isOnline: true,
+        isAvailable: true,
         lastLatitude: 6.53, // ~1km away
         lastLongitude: 3.38,
         lastLocationUpdatedAt: freshTime,
@@ -514,6 +597,72 @@ describe("Delivery Dispatch Processor & Rider Lifecycle Constraints", () => {
     }
   });
 
+  it("should create durable Outbox event as single authoritative retry path without direct BullMQ duplicate when no riders found", async () => {
+    const delivery = {
+      id: "del_single_retry",
+      orderId: "ord_single_retry",
+      status: "READY",
+      riderId: null,
+      dispatchAttempts: 0,
+      order: {
+        id: "ord_single_retry",
+        status: "READY",
+        orderNumber: "CHV-ORD-555",
+        restaurant: { name: "Burger Spot", latitude: 6.5244, longitude: 3.3792 },
+        customer: { userId: "cust_5" },
+      },
+    };
+
+    const findDeliverySpy = vi.spyOn(prisma.delivery, "findUnique").mockResolvedValueOnce(delivery as any);
+    const findRidersSpy = vi.spyOn(prisma.riderProfile, "findMany").mockResolvedValueOnce([]); // No riders online
+    const deliveryUpdateSpy = vi.spyOn(prisma.delivery, "update").mockResolvedValueOnce({} as any);
+    const outboxCreateSpy = vi.spyOn(prisma.outboxEvent, "create").mockResolvedValueOnce({} as any);
+    const findNotifSpy = vi.spyOn(prisma.notification, "findFirst").mockResolvedValueOnce(null);
+    const createNotifSpy = vi.spyOn(prisma.notification, "create").mockResolvedValueOnce({} as any);
+
+    const queueMod = await import("../jobs/queues/index.js");
+    const enqueueTimeoutSpy = vi.spyOn(queueMod, "enqueueDeliveryTimeoutCheck");
+
+    try {
+      const mockJob = {
+        name: JOB_NAMES.CHECK_DELIVERY_TIMEOUT,
+        data: { deliveryId: "del_single_retry", orderId: "ord_single_retry" },
+      } as Job;
+
+      await processDeliveryJob(mockJob);
+
+      // Verify delivery dispatchAttempts was updated
+      expect(deliveryUpdateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ dispatchAttempts: 1 }),
+        })
+      );
+
+      // Verify Outbox event was created as single authoritative retry
+      expect(outboxCreateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            eventType: "DISPATCH_DELIVERY",
+            aggregateType: "DELIVERY",
+            aggregateId: "del_single_retry",
+            status: "PENDING",
+          }),
+        })
+      );
+
+      // Verify NO duplicate direct BullMQ enqueue happened
+      expect(enqueueTimeoutSpy).not.toHaveBeenCalled();
+    } finally {
+      findDeliverySpy.mockRestore();
+      findRidersSpy.mockRestore();
+      deliveryUpdateSpy.mockRestore();
+      outboxCreateSpy.mockRestore();
+      findNotifSpy.mockRestore();
+      createNotifSpy.mockRestore();
+      enqueueTimeoutSpy.mockRestore();
+    }
+  });
+
   it("should reject riders with missing coordinates, out-of-range coordinates, or future-dated timestamps", async () => {
     const delivery = {
       id: "del_strict_geo",
@@ -613,6 +762,9 @@ describe("Delivery Dispatch Processor & Rider Lifecycle Constraints", () => {
         userId: "usr_taken",
         firstName: "First",
         lastName: "Candidate",
+        status: "ACTIVE",
+        isOnline: true,
+        isAvailable: true,
         lastLatitude: 6.525,
         lastLongitude: 3.38,
         lastLocationUpdatedAt: new Date(),
@@ -622,6 +774,9 @@ describe("Delivery Dispatch Processor & Rider Lifecycle Constraints", () => {
         userId: "usr_available",
         firstName: "Second",
         lastName: "Candidate",
+        status: "ACTIVE",
+        isOnline: true,
+        isAvailable: true,
         lastLatitude: 6.526,
         lastLongitude: 3.381,
         lastLocationUpdatedAt: new Date(),
@@ -700,6 +855,7 @@ describe("Delivery Dispatch Processor & Rider Lifecycle Constraints", () => {
     const findDeliverySpy = vi.spyOn(prisma.delivery, "findUnique").mockResolvedValueOnce(mockDelivery as any);
 
     const txRiderProfileUpdateSpy = vi.fn().mockResolvedValue({});
+    const txDeliveryCountSpy = vi.fn().mockResolvedValue(0);
     const mockTx = {
       delivery: {
         update: vi.fn().mockResolvedValue({
@@ -711,6 +867,7 @@ describe("Delivery Dispatch Processor & Rider Lifecycle Constraints", () => {
           updatedAt: new Date(),
           order: { id: "ord_comp_1", restaurant: {} },
         }),
+        count: txDeliveryCountSpy,
       },
       orderStatusHistory: { create: vi.fn().mockResolvedValue({}) },
       order: { update: vi.fn().mockResolvedValue({}) },
@@ -734,6 +891,130 @@ describe("Delivery Dispatch Processor & Rider Lifecycle Constraints", () => {
       findRiderSpy.mockRestore();
       findDeliverySpy.mockRestore();
       txSpy.mockRestore();
+    }
+  });
+
+  it("should enforce shared rider eligibility validation rules", async () => {
+    const { validateRiderEligibility } = await import("../modules/delivery/delivery-eligibility.js");
+
+    const validRider = {
+      status: "ACTIVE",
+      isOnline: true,
+      isAvailable: true,
+      lastLatitude: 6.5244,
+      lastLongitude: 3.3792,
+      lastLocationUpdatedAt: new Date(),
+      activeDeliveryCount: 0,
+    };
+
+    expect(validateRiderEligibility(validRider).eligible).toBe(true);
+
+    // Inactive status
+    expect(validateRiderEligibility({ ...validRider, status: "PENDING_APPROVAL" }).eligible).toBe(false);
+
+    // Offline
+    expect(validateRiderEligibility({ ...validRider, isOnline: false }).eligible).toBe(false);
+
+    // Unavailable
+    expect(validateRiderEligibility({ ...validRider, isAvailable: false }).eligible).toBe(false);
+
+    // Has active deliveries
+    expect(validateRiderEligibility({ ...validRider, activeDeliveryCount: 1 }).eligible).toBe(false);
+
+    // Missing coordinates
+    expect(validateRiderEligibility({ ...validRider, lastLatitude: null }).eligible).toBe(false);
+
+    // Out of bounds coordinates
+    expect(validateRiderEligibility({ ...validRider, lastLatitude: 95.0 }).eligible).toBe(false);
+
+    // Missing location timestamp
+    expect(validateRiderEligibility({ ...validRider, lastLocationUpdatedAt: null }).eligible).toBe(false);
+
+    // Future-dated timestamp (> 60s)
+    expect(validateRiderEligibility({ ...validRider, lastLocationUpdatedAt: new Date(Date.now() + 120000) }).eligible).toBe(false);
+
+    // Stale timestamp (> 30m)
+    expect(validateRiderEligibility({ ...validRider, lastLocationUpdatedAt: new Date(Date.now() - 35 * 60 * 1000) }).eligible).toBe(false);
+  });
+
+  it("should refuse to restore rider availability if rider still has remaining active deliveries", async () => {
+    const { deliveryService } = await import("../modules/delivery/delivery.service.js");
+
+    const mockRider = {
+      id: "rider_multi_1",
+      userId: "usr_rider_multi",
+      isAvailable: false,
+    };
+
+    const mockDelivery = {
+      id: "del_comp_first",
+      orderId: "ord_comp_first",
+      riderId: "rider_multi_1",
+      status: "OUT_FOR_DELIVERY",
+      order: { restaurantId: "rest_1" },
+    };
+
+    const findRiderSpy = vi.spyOn(prisma.riderProfile, "findUnique").mockResolvedValueOnce(mockRider as any);
+    const findDeliverySpy = vi.spyOn(prisma.delivery, "findUnique").mockResolvedValueOnce(mockDelivery as any);
+
+    const txRiderProfileUpdateSpy = vi.fn().mockResolvedValue({});
+    const txDeliveryCountSpy = vi.fn().mockResolvedValue(1); // 1 remaining active delivery!
+    const mockTx = {
+      delivery: {
+        update: vi.fn().mockResolvedValue({
+          id: "del_comp_first",
+          orderId: "ord_comp_first",
+          status: "DELIVERED",
+          deliveredAt: new Date(),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          order: { id: "ord_comp_first", restaurant: {} },
+        }),
+        count: txDeliveryCountSpy,
+      },
+      orderStatusHistory: { create: vi.fn().mockResolvedValue({}) },
+      order: { update: vi.fn().mockResolvedValue({}) },
+      riderProfile: { update: txRiderProfileUpdateSpy },
+    };
+
+    const txSpy = vi.spyOn(prisma, "$transaction").mockImplementationOnce(async (cb: any) => {
+      return cb(mockTx);
+    });
+
+    try {
+      const result = await deliveryService.completeDelivery("usr_rider_multi", "del_comp_first");
+      expect(result.status).toBe("DELIVERED");
+      expect(txRiderProfileUpdateSpy).not.toHaveBeenCalled();
+    } finally {
+      findRiderSpy.mockRestore();
+      findDeliverySpy.mockRestore();
+      txSpy.mockRestore();
+    }
+  });
+
+  it("should reject manual acceptDelivery if rider is ineligible or has active deliveries", async () => {
+    const { deliveryService } = await import("../modules/delivery/delivery.service.js");
+
+    const mockRiderOffline = {
+      id: "rider_off",
+      userId: "usr_off",
+      status: "ACTIVE",
+      isOnline: false, // Ineligible!
+      isAvailable: true,
+      lastLatitude: 6.5244,
+      lastLongitude: 3.3792,
+      lastLocationUpdatedAt: new Date(),
+      deliveries: [],
+    };
+
+    const findRiderSpy = vi.spyOn(prisma.riderProfile, "findUnique").mockResolvedValueOnce(mockRiderOffline as any);
+
+    try {
+      await expect(
+        deliveryService.acceptDelivery("usr_off", "del_any")
+      ).rejects.toThrow(/Rider is not eligible to accept delivery/i);
+    } finally {
+      findRiderSpy.mockRestore();
     }
   });
 });
@@ -812,5 +1093,83 @@ describe("Expo Push Service & Token Maintenance", () => {
       getReceiptsSpy.mockRestore();
       userDeviceUpdateSpy.mockRestore();
     }
+  });
+
+  it("should poll and reconcile receipts for submitted notification deliveries older than 15 minutes", async () => {
+    const pastDate = new Date(Date.now() - 20 * 60 * 1000); // 20 minutes ago
+    const pendingDeliveries = [
+      {
+        id: "deliv_ok",
+        ticketId: "rcpt_success_123",
+        pushToken: "ExponentPushToken[user_ok]",
+        status: "SUBMITTED",
+        createdAt: pastDate,
+      },
+      {
+        id: "deliv_dead",
+        ticketId: "rcpt_dead_456",
+        pushToken: "ExponentPushToken[user_dead]",
+        status: "SUBMITTED",
+        createdAt: pastDate,
+      },
+    ];
+
+    const findManySpy = vi.spyOn(prisma.notificationDelivery, "findMany").mockResolvedValueOnce(pendingDeliveries as any);
+    const updateSpy = vi.spyOn(prisma.notificationDelivery, "update").mockResolvedValue({} as any);
+    const userDeviceUpdateSpy = vi.spyOn(prisma.userDevice, "updateMany").mockResolvedValue({ count: 1 });
+
+    const getReceiptsSpy = vi.spyOn(expoPushService, "getPushNotificationReceipts").mockResolvedValueOnce({
+      rcpt_success_123: { status: "ok" },
+      rcpt_dead_456: {
+        status: "error",
+        details: { error: "DeviceNotRegistered" },
+      },
+    });
+
+    try {
+      const summary = await expoPushService.pollAndReconcileReceipts(15 * 60 * 1000);
+      expect(summary.reconciled).toBe(1);
+      expect(summary.failed).toBe(1);
+
+      // Verify success delivery was marked DELIVERED
+      expect(updateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "deliv_ok" },
+          data: expect.objectContaining({ status: "DELIVERED", receiptId: "rcpt_success_123" }),
+        })
+      );
+
+      // Verify failed delivery was marked FAILED
+      expect(updateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "deliv_dead" },
+          data: expect.objectContaining({ status: "FAILED", receiptId: "rcpt_dead_456" }),
+        })
+      );
+
+      // Verify unregistered device was deactivated
+      expect(userDeviceUpdateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { expoPushToken: "ExponentPushToken[user_dead]" },
+          data: { isActive: false },
+        })
+      );
+    } finally {
+      findManySpy.mockRestore();
+      updateSpy.mockRestore();
+      userDeviceUpdateSpy.mockRestore();
+      getReceiptsSpy.mockRestore();
+    }
+  });
+
+  it("should start and stop the recurring receipt poller loop gracefully", async () => {
+    const pollSpy = vi.spyOn(expoPushService, "pollAndReconcileReceipts").mockResolvedValue({ reconciled: 0, failed: 0 });
+
+    expoPushService.startReceiptPoller(50);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    expect(pollSpy).toHaveBeenCalled();
+    await expoPushService.stopReceiptPoller();
+    pollSpy.mockRestore();
   });
 });

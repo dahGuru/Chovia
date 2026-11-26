@@ -199,6 +199,116 @@ export class ExpoPushService {
       // Safe no-op on database conflict
     }
   }
+
+  private receiptTimer: NodeJS.Timeout | null = null;
+  private isReceiptPolling = false;
+
+  /**
+   * Polls Expo receipts for notifications submitted > 15 minutes ago,
+   * updates delivery statuses to DELIVERED or FAILED,
+   * and deactivates unregistered device tokens.
+   */
+  async pollAndReconcileReceipts(
+    minAgeMs = 15 * 60 * 1000,
+    batchSize = 100
+  ): Promise<{ reconciled: number; failed: number }> {
+    const cutoff = new Date(Date.now() - minAgeMs);
+
+    const pendingDeliveries = await prisma.notificationDelivery.findMany({
+      where: {
+        status: "SUBMITTED",
+        ticketId: { not: null },
+        createdAt: { lte: cutoff },
+      },
+      take: batchSize,
+    });
+
+    if (pendingDeliveries.length === 0) {
+      return { reconciled: 0, failed: 0 };
+    }
+
+    const ticketIds = pendingDeliveries
+      .map((d) => d.ticketId)
+      .filter((id): id is string => typeof id === "string");
+
+    const receipts = await this.getPushNotificationReceipts(ticketIds);
+
+    let reconciled = 0;
+    let failed = 0;
+
+    for (const delivery of pendingDeliveries) {
+      if (!delivery.ticketId) continue;
+      const receipt = receipts[delivery.ticketId];
+      if (!receipt) continue;
+
+      if (receipt.status === "ok") {
+        await prisma.notificationDelivery.update({
+          where: { id: delivery.id },
+          data: {
+            status: "DELIVERED",
+            receiptStatus: "ok",
+            deliveredAt: new Date(),
+          },
+        });
+        reconciled++;
+      } else if (receipt.status === "error") {
+        await prisma.notificationDelivery.update({
+          where: { id: delivery.id },
+          data: {
+            status: "FAILED",
+            receiptStatus: "error",
+            errorMessage: receipt.message || (receipt.details?.error ? String(receipt.details.error) : "Receipt error"),
+            failedAt: new Date(),
+          },
+        });
+        failed++;
+
+        if (receipt.details?.error === "DeviceNotRegistered") {
+          await this.deactivateInvalidToken(delivery.expoPushToken);
+        }
+      }
+    }
+
+    return { reconciled, failed };
+  }
+
+  /**
+   * Starts the recurring background receipt reconciliation loop.
+   */
+  startReceiptPoller(intervalMs = 60000): void {
+    if (this.receiptTimer) return;
+
+    const poll = async () => {
+      if (this.isReceiptPolling) return;
+      this.isReceiptPolling = true;
+      try {
+        await this.pollAndReconcileReceipts();
+      } catch (err) {
+        console.error("[EXPO RECEIPT POLLER] Error polling receipts:", err);
+      } finally {
+        this.isReceiptPolling = false;
+      }
+    };
+
+    this.receiptTimer = setInterval(() => {
+      void poll();
+    }, intervalMs);
+    console.log(`[EXPO] Receipt poller loop started (interval: ${intervalMs}ms)`);
+  }
+
+  /**
+   * Gracefully stops the recurring background receipt reconciliation loop.
+   */
+  async stopReceiptPoller(): Promise<void> {
+    if (this.receiptTimer) {
+      clearInterval(this.receiptTimer);
+      this.receiptTimer = null;
+    }
+    while (this.isReceiptPolling) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    console.log("[EXPO] Receipt poller loop stopped gracefully.");
+  }
 }
 
 export const expoPushService = new ExpoPushService();

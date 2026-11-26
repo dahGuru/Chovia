@@ -24,14 +24,16 @@ CHOVIA integrates with external third-party service providers to power payments,
 
 ## 2. Paystack Payment & Refund Integration
 
-Location: [backend/src/integrations/paystack/paystack.service.ts](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/backend/src/integrations/paystack/paystack.service.ts)
+Location: [backend/src/integrations/paystack/paystack.service.ts](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/backend/src/integrations/paystack/paystack.service.ts), [backend/src/modules/payments/payments.service.ts](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/backend/src/modules/payments/payments.service.ts)
 
 ### Capabilities
-- **Transaction Initialization:** Sends payment amount (in kobo minor units), customer email, order reference, and callback URL to Paystack. Enforces strict provider reference verification (`data.reference === params.reference`).
-- **Payment Verification:** Queries `/transaction/verify/:reference` with expected amount and currency checks. Distinguishes transient provider 5xx outages (throws `PaymentGatewayError`) from genuine failures.
-- **HMAC Webhook Ingestion:** Validates incoming `x-paystack-signature` using HMAC-SHA512 with `PAYSTACK_WEBHOOK_SECRET`. Handles `charge.success`, `refund.processed`, and `refund.failed`.
-- **Refund Management:** Initiates refunds via Paystack `/refund` API (`createRefund`), records merchant notes, updates refund records, and creates audit logs.
-- **State Reconciliation:** Prevents reviving terminal order states (`CANCELLED`, `REJECTED`) or orders with existing refunds to `CONFIRMED`.
+- **Row-Level Exclusive Locking (`FOR UPDATE`):** Acquires PostgreSQL row-level locks on `orders` during refund reservation and payment state updates, eliminating race conditions under concurrent refund or checkout attempts.
+- **Concurrency-Safe Partial Refunds:** Computes cumulative existing non-failed refunds against total captured payment amount. Rejects requests exceeding remaining refundable balance.
+- **Monotonic Refund State Machine:** Enforces transitions `REFUND_PENDING` -> `PROCESSING` -> `REFUNDED` (terminal success) or `FAILED` (terminal failure). Webhook late arrivals cannot downgrade a confirmed `REFUNDED` status to `FAILED`.
+- **Provider Timeout Recovery:** On Paystack gateway timeout (502 `PaymentGatewayError`), the database reservation is safely preserved in `PROCESSING` status rather than releasing funds prematurely or failing silently.
+- **Unambiguous Webhook Correlation & Quarantine:** Matches incoming refund webhooks by `providerRefundId` first. If matching by order payment reference, correlates only when exactly one candidate exists; ambiguous multi-refund orders are quarantined for manual operator review without state corruption.
+- **Strict Webhook Quarantine on Mismatch:** Quarantines webhooks with missing amount, currency, or mismatched figures without falsely marking successful customer payments as failed.
+- **Reconciliation Endpoints:** Exposes `reconcilePayment(paymentId)` and `reconcileRefund(refundId)` for administrative operational verification and automated recovery.
 
 ---
 
@@ -51,6 +53,8 @@ Location: [backend/src/integrations/google-maps/google-maps.service.ts](file:///
 Location: [backend/src/integrations/cloudinary/cloudinary.service.ts](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/backend/src/integrations/cloudinary/cloudinary.service.ts)
 
 ### Capabilities
+- **Async DNS Resolution & SSRF Prevention (`validateRemoteUrl`):** Enforces HTTPS and performs asynchronous DNS lookups (`dns.promises.lookup` with `{ all: true }`) resolving all IPv4 and IPv6 addresses. Blocks domains resolving to loopback (`127.0.0.0/8`, `::1`), private (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`), link-local/cloud metadata (`169.254.0.0/16`, `fe80::/10`), carrier-grade NAT (`100.64.0.0/10`), unique local (`fc00::/7`), and documentation/test net ranges.
+- **Exact Segment-Based Asset Ownership:** Enforces exact path segment matching for user avatars (`chovia/avatars/{userId}/...` or `chovia/avatars/{userId}_...`), preventing substring collision vulnerabilities (e.g. `user_1` claiming `user_100` assets).
 - **Signed Client Uploads:** Generates cryptographic HMAC-SHA1 signatures with signed folder, timestamp, and size parameters, allowing mobile/web apps to upload directly to Cloudinary without streaming binary files through API servers.
 - **Magic Byte Sniffing (`inspectFileMagicBytes`):** Validates buffer magic bytes (JPEG `FF D8 FF`, PNG `89 50 4E 47`, WEBP `RIFF...WEBP`, PDF `%PDF`) before processing or storing images.
 - **Post-Upload Verification (`/verify-upload`):** Validates that uploaded assets match folder policies, format restrictions, and byte size limits before attaching them to domain entities.
@@ -74,14 +78,15 @@ Location: [backend/src/integrations/resend/resend.service.ts](file:///C:/Users/H
 
 ---
 
-## 6. Expo Push Notification Service
+## 6. Expo Push Notification Service & Durable Receipts
 
-Location: [backend/src/integrations/expo/expo-push.service.ts](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/backend/src/integrations/expo/expo-push.service.ts)
+Location: [backend/src/integrations/expo/expo-push.service.ts](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/backend/src/integrations/expo/expo-push.service.ts), [backend/src/jobs/processors/notification.processor.ts](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/backend/src/jobs/processors/notification.processor.ts)
 
 ### Capabilities
-- **Push Notification Dispatch:** Formats and batches push messages to Expo's push service endpoint (`https://exp.host/--/api/v2/push/send`) with optional `EXPO_ACCESS_TOKEN` bearer authentication.
-- **Token Validation (`isExpoPushToken`):** Validates token format before network dispatch.
-- **Token Maintenance:** Automatically catches `DeviceNotRegistered` error tickets and deactivates expired tokens (`UserDevice.isActive = false`) in PostgreSQL.
+- **Durable Delivery Lifecycle:** Tracks individual device deliveries via `NotificationDelivery` (`QUEUED` -> `SUBMITTED` -> `DELIVERED` / `FAILED`).
+- **Push Notification Dispatch:** Formats and batches push messages to Expo's push service endpoint (`https://exp.host/--/api/v2/push/send`) with mandatory `EXPO_ACCESS_TOKEN` bearer authentication in staging and production.
+- **Recurring Receipt Reconciliation Worker:** Runs a continuous background polling loop (`pollAndReconcileReceipts`) querying Expo receipts for notifications submitted >15 minutes ago, marking confirmed deliveries as `DELIVERED`, capturing provider failure reasons, and updating PostgreSQL state.
+- **Automated Token Maintenance:** Automatically catches `DeviceNotRegistered` error tickets and receipts, deactivating expired device tokens (`UserDevice.isActive = false`) in PostgreSQL.
 
 ---
 
@@ -90,5 +95,6 @@ Location: [backend/src/integrations/expo/expo-push.service.ts](file:///C:/Users/
 Location: [backend/src/integrations/sentry/sentry.service.ts](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/backend/src/integrations/sentry/sentry.service.ts)
 
 ### Capabilities
-- **Exception & Breadcrumb Capture:** Captures runtime exceptions, HTTP request context, and distributed traces.
-- **Deep PII Scrubbing (`scrubData` & `sanitizeString`):** Masks Bearer tokens, JWT strings, connection URLs with credentials, Paystack keys, Resend keys, passwords, OTPs, CVVs, and account numbers from strings, request headers, query parameters, breadcrumbs, tags, and exceptions.
+- **Exception & Breadcrumb Capture:** Captures runtime exceptions, HTTP request context, and distributed traces without mutating original `Error` objects.
+- **Bounded Recursion & Circular Reference Protection:** `scrubData` utilizes a `WeakSet<object>` visited tracker to detect circular references (`[CIRCULAR]`) and bounds nested structure traversal to a depth of 10 (`[MAX_DEPTH_EXCEEDED]`), preventing call stack exhaustion.
+- **Deep PII/Secret Scrubbing:** Pure, non-mutating masking across all event surfaces (headers, body data, query strings, breadcrumbs, user info, tags, contexts, and exception messages) for Bearer tokens, JWTs, connection URLs, Paystack keys, passwords, OTPs, CVVs, and account numbers.

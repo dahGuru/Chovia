@@ -62,6 +62,7 @@ export const uploadSignatureResponseSchema = z
     allowedFormats: z.array(z.string()),
     maxFileSize: z.number(),
     resourceType: z.string(),
+    deliveryType: z.enum(["upload", "authenticated"]).optional(),
     publicId: z.string().optional(),
   })
   .strict();

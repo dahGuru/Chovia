@@ -51,6 +51,28 @@ async function verifyUploadAuthorization(
   }
 }
 
+function scopePublicIdForUser(
+  userId: string,
+  folder: AllowedFolder,
+  customPublicId?: string
+): string | undefined {
+  if (folder !== "documents" && folder !== "avatars") {
+    return customPublicId;
+  }
+  if (!customPublicId) {
+    return `${userId}/${folder}_${Date.now()}`;
+  }
+  const normalized = customPublicId.replace(/^\/+/, "");
+  if (
+    normalized === userId ||
+    normalized.startsWith(`${userId}/`) ||
+    normalized.startsWith(`${userId}_`)
+  ) {
+    return normalized;
+  }
+  throw new ForbiddenError("customPublicId must be scoped under your own user prefix");
+}
+
 export const usersRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.addHook("preHandler", fastify.authenticate);
 
@@ -167,8 +189,9 @@ export const usersRoutes: FastifyPluginAsync = async (fastify) => {
       const body = uploadSignatureRequestSchema.parse(request.body);
       await verifyUploadAuthorization(request.user, body.folder, body.restaurantId);
       cloudinaryService.validateUploadMetadata(body.folder, body.mimeType, body.fileSizeBytes);
+      const scopedPublicId = scopePublicIdForUser(request.user.id, body.folder, body.customPublicId);
 
-      const signature = cloudinaryService.generateUploadSignature(body.folder, body.customPublicId);
+      const signature = cloudinaryService.generateUploadSignature(body.folder, scopedPublicId);
       return reply.status(200).send(signature);
     }
   );
@@ -177,7 +200,7 @@ export const usersRoutes: FastifyPluginAsync = async (fastify) => {
     "/upload-image",
     {
       schema: {
-        description: "Upload image directly to Cloudinary via server",
+        description: "Upload image or document directly to Cloudinary via server",
         tags: ["Users", "Uploads"],
         security: [{ bearerAuth: [] }],
         body: uploadImageRequestSchema,
@@ -185,10 +208,12 @@ export const usersRoutes: FastifyPluginAsync = async (fastify) => {
           200: z.object({
             publicId: z.string(),
             secureUrl: z.string(),
+            deliveryType: z.enum(["upload", "authenticated"]).optional(),
             width: z.number().optional(),
             height: z.number().optional(),
             format: z.string().optional(),
             bytes: z.number().optional(),
+            resourceType: z.string().optional(),
           }),
         },
       },
@@ -197,8 +222,9 @@ export const usersRoutes: FastifyPluginAsync = async (fastify) => {
       const body = uploadImageRequestSchema.parse(request.body);
       await verifyUploadAuthorization(request.user, body.folder, body.restaurantId);
       cloudinaryService.validateUploadMetadata(body.folder, body.mimeType, body.fileSizeBytes);
+      const scopedPublicId = scopePublicIdForUser(request.user.id, body.folder, body.customPublicId);
 
-      const result = await cloudinaryService.uploadImage(body.file, body.folder, body.customPublicId);
+      const result = await cloudinaryService.uploadImage(body.file, body.folder, scopedPublicId);
       return reply.status(200).send(result);
     }
   );

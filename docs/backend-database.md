@@ -127,8 +127,18 @@ PostgreSQL is the single authoritative source of truth for CHOVIA's business ope
 
 ### 5.1 Outbox & Reliability Schema
 In [database/prisma/schema.prisma](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/database/prisma/schema.prisma):
-- **`OutboxEvent` Model:** Implements transactional outbox durability (`id`, `eventType`, `aggregateType`, `aggregateId`, `payload`, `status`, `attempts`, `scheduledAt`, `processedAt`, `lastError`).
-- **`OutboxEventStatus` Enum:** `PENDING`, `PROCESSING`, `DISPATCHED`, `FAILED`.
+- **`OutboxEvent` Model & Distributed Lease Semantics:** Implements transactional outbox durability with explicit distributed lease claiming:
+  - `claimToken String? @db.Uuid`: Unique per-worker token generated during atomic claim.
+  - `leaseExpiresAt DateTime?`: Explicit TTL expiration preventing worker deadlocks or indefinite locks.
+  - Compound index: `@@index([status, leaseExpiresAt])` for fast recovery of stale processing leases.
+- **`NotificationDelivery` Model & Tracking:** Durable mobile push delivery lifecycle:
+  - `id String @id @default(uuid()) @db.Uuid`
+  - `notificationId String @db.Uuid` (relation to `Notification`)
+  - `userDeviceId String @db.Uuid` (relation to `UserDevice`)
+  - `pushToken String`, `ticketId String?`, `receiptId String?`
+  - `status NotificationDeliveryStatus @default(QUEUED)` (`QUEUED`, `SUBMITTED`, `DELIVERED`, `FAILED`)
+  - `errorDetails Json?`
+  - Compound indexes: `@@index([status, createdAt])`, `@@index([ticketId])`, `@@index([receiptId])`.
 - **`Payment.providerTransactionId`:** Tracks external provider numeric or string transaction identifiers with `@unique` constraint.
 - **`DeliveryStatus` Lifecycle:** Added `PENDING` to `DeliveryStatus` enum; set `@default(PENDING)` on `Delivery.status`.
 - **`Delivery` Retries:** Added `dispatchAttempts Int @default(0)` and `lastDispatchAttemptAt DateTime?` for bounded retry tracking.
@@ -137,5 +147,7 @@ In [database/prisma/schema.prisma](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food D
 ### 5.2 Migration File Policy
 In accordance with strict safety constraints (`AGENTS.md` - *"Never run destructive migrations, resets, or data deletion without explicit approval"*):
 - Schema changes have been validated via `pnpm db:validate` and the Prisma client generated via `pnpm db:generate`.
-- A pure SQL migration script has been generated at [database/prisma/migrations/20261123140000_stage_3_2_2_remediation/migration.sql](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/database/prisma/migrations/20261123140000_stage_3_2_2_remediation/migration.sql).
-- The migration is **unapplied to remote/production databases** and ready for controlled execution via `pnpm db:deploy` or platform CI/CD pipelines during scheduled maintenance.
+- Complete unapplied SQL migrations have been generated under `database/prisma/migrations/`:
+  - [database/prisma/migrations/20261123140000_stage_3_2_2_remediation/migration.sql](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/database/prisma/migrations/20261123140000_stage_3_2_2_remediation/migration.sql)
+  - [database/prisma/migrations/20261124080000_outbox_leases_and_notification_deliveries/migration.sql](file:///C:/Users/HP/Videos/WEB DEV 1.0/Food Delivery/Chovia/database/prisma/migrations/20261124080000_outbox_leases_and_notification_deliveries/migration.sql)
+- The migrations are **unapplied to remote/production databases** and ready for controlled execution via `pnpm db:deploy` or platform CI/CD pipelines during scheduled maintenance.

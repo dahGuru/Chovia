@@ -21,6 +21,8 @@ import { emailService } from "../../integrations/email/email.service.js";
 import type { AuthUserPayload } from "../../types/auth.js";
 import type {
   RegisterRequestDto,
+  RiderRegisterRequestDto,
+  RiderRegisterResponseDto,
   LoginRequestDto,
   UserResponseDto,
   AuthResponseDto,
@@ -102,6 +104,77 @@ export class AuthService {
       user: serializeUser(user),
       otpData: {
         message: "Registration successful. Please verify your email.",
+        signedToken,
+        expiresInMinutes: env.OTP_EXPIRES_IN_MINUTES,
+      },
+    };
+  }
+
+  async registerRider(dto: RiderRegisterRequestDto): Promise<RiderRegisterResponseDto> {
+    const existing = await prisma.user.findFirst({
+      where: {
+        OR: [{ email: dto.email }, { phone: dto.phone }],
+      },
+    });
+
+    if (existing) {
+      if (existing.email === dto.email) {
+        throw new ConflictError("Email is already registered");
+      }
+      throw new ConflictError("Phone number is already registered");
+    }
+
+    const passwordHash = await hashPassword(dto.password);
+    const fullName = `${dto.firstName} ${dto.lastName}`.trim();
+
+    const user = await prisma.user.create({
+      data: {
+        name: fullName,
+        email: dto.email,
+        phone: dto.phone,
+        passwordHash,
+        role: "RIDER",
+        status: "ACTIVE",
+        emailVerified: false,
+        riderProfile: {
+          create: {
+            firstName: dto.firstName,
+            lastName: dto.lastName,
+            status: "PENDING",
+            isOnline: false,
+            isAvailable: false,
+          },
+        },
+      },
+      include: {
+        riderProfile: true,
+      },
+    });
+
+    const otp = generateNumericOtp();
+    const { signedToken } = createOtpSignature(dto.email, otp, "VERIFY_EMAIL");
+    let emailDeliveryStatus: "SENT" | "FAILED_RETRYABLE" = "SENT";
+
+    try {
+      await emailService.sendVerificationEmail(dto.email, otp);
+    } catch {
+      emailDeliveryStatus = "FAILED_RETRYABLE";
+    }
+
+    return {
+      user: serializeUser(user),
+      riderProfile: {
+        id: user.riderProfile!.id,
+        status: user.riderProfile!.status,
+        isOnline: user.riderProfile!.isOnline,
+        isAvailable: user.riderProfile!.isAvailable,
+      },
+      emailDeliveryStatus,
+      otpData: {
+        message:
+          emailDeliveryStatus === "SENT"
+            ? "Rider registration successful. Please verify your email."
+            : "Rider account created, but verification email could not be sent right now. Please tap Resend Code.",
         signedToken,
         expiresInMinutes: env.OTP_EXPIRES_IN_MINUTES,
       },

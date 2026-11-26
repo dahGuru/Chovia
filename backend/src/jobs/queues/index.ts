@@ -16,9 +16,15 @@ function getQueueConnection() {
 }
 
 export function createOpaqueJobId(prefix: string, ...inputs: (string | number)[]): string {
+  const serialized = inputs
+    .map((val) => {
+      const str = String(val);
+      return `${Buffer.byteLength(str, "utf8")}:${str}`;
+    })
+    .join(";");
   const digest = crypto
     .createHash("sha256")
-    .update(inputs.join(":"))
+    .update(serialized)
     .digest("hex")
     .slice(0, 24);
   return `${prefix}_${digest}`;
@@ -84,7 +90,7 @@ export async function enqueueVerificationEmail(data: SendVerificationEmailJobDat
     throw new Error("Email queue is unavailable");
   }
   await queue.add(JOB_NAMES.SEND_VERIFICATION_EMAIL, data, {
-    jobId: createOpaqueJobId("email_verify", data.email, Date.now()),
+    jobId: createOpaqueJobId("email_verify", data.email, data.otp),
   });
 }
 
@@ -94,7 +100,7 @@ export async function enqueuePasswordResetEmail(data: SendPasswordResetEmailJobD
     throw new Error("Email queue is unavailable");
   }
   await queue.add(JOB_NAMES.SEND_PASSWORD_RESET_EMAIL, data, {
-    jobId: createOpaqueJobId("email_reset", data.email, Date.now()),
+    jobId: createOpaqueJobId("email_reset", data.email, data.otp),
   });
 }
 
@@ -104,7 +110,7 @@ export async function enqueueStaffInviteEmail(data: SendStaffInviteEmailJobData)
     throw new Error("Email queue is unavailable");
   }
   await queue.add(JOB_NAMES.SEND_STAFF_INVITE_EMAIL, data, {
-    jobId: createOpaqueJobId("email_invite", data.email, Date.now()),
+    jobId: createOpaqueJobId("email_invite", data.email, data.inviteToken),
   });
 }
 
@@ -116,7 +122,7 @@ export async function enqueuePushNotification(data: SendPushNotificationJobData)
   const targetRef = data.data?.orderId || data.data?.deliveryId || "direct";
   const slug = data.title.toLowerCase().replace(/[^a-z0-9]/g, "_");
   await queue.add(JOB_NAMES.SEND_PUSH_NOTIFICATION, data, {
-    jobId: createOpaqueJobId("notif", data.userId, slug, String(targetRef), Date.now()),
+    jobId: createOpaqueJobId("notif", data.userId, slug, String(targetRef), data.body),
   });
 }
 
@@ -126,7 +132,7 @@ export async function enqueueDeliveryTimeoutCheck(data: CheckDeliveryTimeoutJobD
     throw new Error("Delivery queue is unavailable");
   }
   await queue.add(JOB_NAMES.CHECK_DELIVERY_TIMEOUT, data, {
-    jobId: createOpaqueJobId("delivery_dispatch", data.deliveryId, Date.now()),
+    jobId: createOpaqueJobId("delivery_dispatch", data.deliveryId, data.orderId),
     delay: delayMs,
   });
 }

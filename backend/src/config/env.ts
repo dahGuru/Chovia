@@ -4,6 +4,10 @@ import { z } from "zod";
 const DEFAULT_DEV_JWT_ACCESS = "chovia_dev_jwt_access_secret_must_be_overridden_in_prod_32c";
 const DEFAULT_DEV_JWT_REFRESH = "chovia_dev_jwt_refresh_secret_must_be_overridden_in_prod_32c";
 const DEFAULT_DEV_OTP_HMAC = "chovia_dev_otp_hmac_secret_must_be_overridden_in_prod_32c";
+const DEFAULT_DEV_KYC_ENCRYPTION_KEY =
+  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+const HEX_64_REGEX = /^[0-9a-fA-F]{64}$/;
 
 export const environmentSchema = z
   .object({
@@ -28,8 +32,18 @@ export const environmentSchema = z
     OTP_HMAC_SECRET: z.string().min(32, "OTP_HMAC_SECRET must be at least 32 characters"),
     OTP_EXPIRES_IN_MINUTES: z.coerce.number().int().min(1).max(60).default(15),
 
+    // KYC Field Encryption (AES-256-GCM, 32-byte key as 64 hex characters)
+    KYC_ENCRYPTION_KEY: z
+      .string()
+      .regex(HEX_64_REGEX, "KYC_ENCRYPTION_KEY must be a 64-character hexadecimal string (32 bytes)")
+      .optional(),
+
     // CORS & Mocking
-    CORS_ORIGIN: z.string().default("http://localhost:3000,http://localhost:3001,http://localhost:3002"),
+    CORS_ORIGIN: z
+      .string()
+      .default(
+        "http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:8081,http://localhost:8082"
+      ),
     MOCK_INTEGRATIONS: z
       .preprocess((val) => {
         if (typeof val === "boolean") return val;
@@ -65,6 +79,9 @@ export const environmentSchema = z
         return true;
       }, z.boolean())
       .default(true),
+
+    // Expo Push Notifications
+    EXPO_ACCESS_TOKEN: z.string().default(""),
   })
   .superRefine((data, ctx) => {
     const isProd = data.NODE_ENV === "production";
@@ -82,24 +99,44 @@ export const environmentSchema = z
       if (
         data.DATABASE_URL.includes("localhost") ||
         data.DATABASE_URL.includes("127.0.0.1") ||
+        data.DATABASE_URL.includes("::1") ||
+        data.DATABASE_URL.includes("[::1]") ||
         data.DATABASE_URL === "postgresql://postgres:postgres@localhost:5432/chovia?schema=public"
       ) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["DATABASE_URL"],
-          message: "Production DATABASE_URL must not point to localhost.",
+          message: "Production DATABASE_URL must not point to localhost or loopback.",
         });
       }
 
       if (
         data.REDIS_URL.includes("localhost") ||
         data.REDIS_URL.includes("127.0.0.1") ||
+        data.REDIS_URL.includes("::1") ||
+        data.REDIS_URL.includes("[::1]") ||
         data.REDIS_URL === "redis://localhost:6379"
       ) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["REDIS_URL"],
-          message: "Production REDIS_URL must not point to localhost.",
+          message: "Production REDIS_URL must not point to localhost or loopback.",
+        });
+      }
+
+      if (!data.REDIS_URL.startsWith("rediss://")) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["REDIS_URL"],
+          message: "Production requires secure TLS Redis connection (rediss:// protocol).",
+        });
+      }
+
+      if (!data.EXPO_ACCESS_TOKEN) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["EXPO_ACCESS_TOKEN"],
+          message: "EXPO_ACCESS_TOKEN is required in production.",
         });
       }
 
@@ -132,6 +169,20 @@ export const environmentSchema = z
           code: z.ZodIssueCode.custom,
           path: ["OTP_HMAC_SECRET"],
           message: "Insecure or default OTP_HMAC_SECRET cannot be used in production.",
+        });
+      }
+
+      if (!data.KYC_ENCRYPTION_KEY) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["KYC_ENCRYPTION_KEY"],
+          message: "KYC_ENCRYPTION_KEY is required in production.",
+        });
+      } else if (data.KYC_ENCRYPTION_KEY.toLowerCase() === DEFAULT_DEV_KYC_ENCRYPTION_KEY) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["KYC_ENCRYPTION_KEY"],
+          message: "Default development KYC_ENCRYPTION_KEY cannot be used in production.",
         });
       }
 
@@ -209,24 +260,44 @@ export const environmentSchema = z
       if (
         data.DATABASE_URL.includes("localhost") ||
         data.DATABASE_URL.includes("127.0.0.1") ||
+        data.DATABASE_URL.includes("::1") ||
+        data.DATABASE_URL.includes("[::1]") ||
         data.DATABASE_URL === "postgresql://postgres:postgres@localhost:5432/chovia?schema=public"
       ) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["DATABASE_URL"],
-          message: "Staging DATABASE_URL must not point to localhost.",
+          message: "Staging DATABASE_URL must not point to localhost or loopback.",
         });
       }
 
       if (
         data.REDIS_URL.includes("localhost") ||
         data.REDIS_URL.includes("127.0.0.1") ||
+        data.REDIS_URL.includes("::1") ||
+        data.REDIS_URL.includes("[::1]") ||
         data.REDIS_URL === "redis://localhost:6379"
       ) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["REDIS_URL"],
-          message: "Staging REDIS_URL must not point to localhost.",
+          message: "Staging REDIS_URL must not point to localhost or loopback.",
+        });
+      }
+
+      if (!data.REDIS_URL.startsWith("rediss://")) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["REDIS_URL"],
+          message: "Staging requires secure TLS Redis connection (rediss:// protocol).",
+        });
+      }
+
+      if (!data.EXPO_ACCESS_TOKEN) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["EXPO_ACCESS_TOKEN"],
+          message: "EXPO_ACCESS_TOKEN is required in staging.",
         });
       }
 
@@ -301,6 +372,20 @@ export const environmentSchema = z
           message: "A valid SENTRY_DSN URL is mandatory in staging.",
         });
       }
+
+      if (!data.KYC_ENCRYPTION_KEY) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["KYC_ENCRYPTION_KEY"],
+          message: "KYC_ENCRYPTION_KEY is required in staging.",
+        });
+      } else if (data.KYC_ENCRYPTION_KEY.toLowerCase() === DEFAULT_DEV_KYC_ENCRYPTION_KEY) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["KYC_ENCRYPTION_KEY"],
+          message: "Default development KYC_ENCRYPTION_KEY cannot be used in staging.",
+        });
+      }
     } else {
       // In development or test, if secrets are not explicitly provided, supply safe development defaults
       if (!data.JWT_ACCESS_SECRET) {
@@ -311,6 +396,9 @@ export const environmentSchema = z
       }
       if (!data.OTP_HMAC_SECRET) {
         data.OTP_HMAC_SECRET = DEFAULT_DEV_OTP_HMAC;
+      }
+      if (!data.KYC_ENCRYPTION_KEY) {
+        data.KYC_ENCRYPTION_KEY = DEFAULT_DEV_KYC_ENCRYPTION_KEY;
       }
     }
   });
@@ -327,6 +415,9 @@ if (process.env["NODE_ENV"] !== "production" && process.env["NODE_ENV"] !== "sta
   }
   if (!process.env["OTP_HMAC_SECRET"]) {
     process.env["OTP_HMAC_SECRET"] = DEFAULT_DEV_OTP_HMAC;
+  }
+  if (!process.env["KYC_ENCRYPTION_KEY"]) {
+    process.env["KYC_ENCRYPTION_KEY"] = DEFAULT_DEV_KYC_ENCRYPTION_KEY;
   }
 }
 

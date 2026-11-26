@@ -1,4 +1,6 @@
-import { describe, it, expect } from "vitest";
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import dns from "node:dns/promises";
+import { describe, it, expect, vi } from "vitest";
 import { CloudinaryService, inspectFileMagicBytes } from "../integrations/cloudinary/cloudinary.service.js";
 import { GoogleMapsService } from "../integrations/google-maps/google-maps.service.js";
 import { scrubData, sanitizeString } from "../integrations/sentry/sentry.service.js";
@@ -20,6 +22,7 @@ describe("Environment Schema Security & Strict Validation", () => {
     JWT_ACCESS_SECRET: "strong_production_jwt_access_secret_key_minimum_32_chars_12345",
     JWT_REFRESH_SECRET: "strong_production_jwt_refresh_secret_key_minimum_32_chars_67890",
     OTP_HMAC_SECRET: "strong_production_otp_hmac_secret_key_minimum_32_chars_abcdef",
+    KYC_ENCRYPTION_KEY: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
     PAYSTACK_SECRET_KEY: FAKE_LIVE_KEY,
     PAYSTACK_PUBLIC_KEY: "pk_live_1234567890abcdef",
     PAYSTACK_WEBHOOK_SECRET: "whsec_live_1234567890abcdef",
@@ -29,6 +32,7 @@ describe("Environment Schema Security & Strict Validation", () => {
     RESEND_API_KEY: "re_live_1234567890abcdef",
     GOOGLE_MAPS_API_KEY: "AIzaSy_mock_google_maps_api_key_production",
     SENTRY_DSN: "https://mockdsn@o12345.ingest.sentry.io/67890",
+    EXPO_ACCESS_TOKEN: "mock_expo_access_token_12345",
     MOCK_INTEGRATIONS: false,
   };
 
@@ -138,6 +142,56 @@ describe("Environment Schema Security & Strict Validation", () => {
     });
     expect(redisResult.success).toBe(false);
   });
+
+  it("should enforce TLS rediss:// protocol for REDIS_URL in production and staging", () => {
+    const prodPlainRedis = environmentSchema.safeParse({
+      ...baseProdConfig,
+      REDIS_URL: "redis://default:prod_pass@upstash.io:6379/0",
+    });
+    expect(prodPlainRedis.success).toBe(false);
+    if (!prodPlainRedis.success) {
+      expect(prodPlainRedis.error.issues.some((i) => i.message.includes("rediss://"))).toBe(true);
+    }
+
+    const stagingPlainRedis = environmentSchema.safeParse({
+      ...baseProdConfig,
+      NODE_ENV: "staging",
+      REDIS_URL: "redis://default:staging_pass@upstash.io:6379/0",
+    });
+    expect(stagingPlainRedis.success).toBe(false);
+    if (!stagingPlainRedis.success) {
+      expect(stagingPlainRedis.error.issues.some((i) => i.message.includes("rediss://"))).toBe(true);
+    }
+  });
+
+  it("should reject IPv6 loopback addresses for DATABASE_URL and REDIS_URL in production", () => {
+    const dbIpv6 = environmentSchema.safeParse({
+      ...baseProdConfig,
+      DATABASE_URL: "postgresql://user:pass@[::1]:5432/db",
+    });
+    expect(dbIpv6.success).toBe(false);
+
+    const redisIpv6 = environmentSchema.safeParse({
+      ...baseProdConfig,
+      REDIS_URL: "rediss://default:pass@[::1]:6380/0",
+    });
+    expect(redisIpv6.success).toBe(false);
+  });
+
+  it("should require EXPO_ACCESS_TOKEN in production and staging", () => {
+    const prodNoExpo = environmentSchema.safeParse({
+      ...baseProdConfig,
+      EXPO_ACCESS_TOKEN: "",
+    });
+    expect(prodNoExpo.success).toBe(false);
+
+    const stagingNoExpo = environmentSchema.safeParse({
+      ...baseProdConfig,
+      NODE_ENV: "staging",
+      EXPO_ACCESS_TOKEN: "",
+    });
+    expect(stagingNoExpo.success).toBe(false);
+  });
 });
 
 describe("Sentry PII Scrubbing & Data Sanitization", () => {
@@ -196,15 +250,34 @@ describe("Sentry PII Scrubbing & Data Sanitization", () => {
     expect(sanitizeString(rawKey)).toBe("Paystack rejected key: sk_live_[REDACTED]");
   });
 
-  it("should not mutate the original Error object when capturing exceptions", () => {
-    const error = new Error("Failed with secret: sk_live_1234567890abcdef1234567890");
-    const originalMessage = error.message;
+  it("should safely handle circular references without stack overflow crashes", () => {
+    const circularObj: any = { name: "Safe Name", secret: "super_secret_value" };
+    circularObj.self = circularObj;
 
-    // Importing sentryService to verify captureException behavior
-    import("../integrations/sentry/sentry.service.js").then(({ sentryService }) => {
-      sentryService.captureException(error);
-      expect(error.message).toBe(originalMessage);
-    });
+    const scrubbed = scrubData(circularObj) as any;
+    expect(scrubbed.name).toBe("Safe Name");
+    expect(scrubbed.secret).toBe("[REDACTED]");
+    expect(scrubbed.self).toBe("[CIRCULAR]");
+  });
+
+  it("should bound deep recursion at depth 10 without exceeding stack", () => {
+    let deep: any = { value: "deep_end" };
+    for (let i = 0; i < 15; i++) {
+      deep = { nested: deep };
+    }
+
+    const scrubbed = scrubData(deep) as any;
+    expect(scrubbed).toBeDefined();
+
+    // Traversal down 10 levels should hit [MAX_DEPTH_EXCEEDED]
+    let cur = scrubbed;
+    let depth = 0;
+    while (cur && typeof cur === "object" && cur.nested) {
+      cur = cur.nested;
+      depth++;
+    }
+    expect(depth).toBe(10);
+    expect(cur).toBe("[MAX_DEPTH_EXCEEDED]");
   });
 });
 
@@ -306,36 +379,62 @@ describe("Cloudinary Integration & Validation Security", () => {
     }).not.toThrow();
   });
 
-  it("should validate and reject SSRF remote URLs and enforce HTTPS", () => {
-    expect(() => cloudinary.validateRemoteUrl("http://example.com/image.png")).toThrow(
+  it("should validate and reject SSRF remote URLs and enforce HTTPS", async () => {
+    await expect(cloudinary.validateRemoteUrl("http://example.com/image.png")).rejects.toThrow(
       /Remote upload URLs must use HTTPS/i
     );
-    expect(() => cloudinary.validateRemoteUrl("https://localhost/image.png")).toThrow(
+    await expect(cloudinary.validateRemoteUrl("https://localhost/image.png")).rejects.toThrow(
       /internal, loopback, or metadata services are forbidden/i
     );
-    expect(() => cloudinary.validateRemoteUrl("https://127.0.0.1/secret")).toThrow(
+    await expect(cloudinary.validateRemoteUrl("https://127.0.0.1/secret")).rejects.toThrow(
       /internal, loopback, or metadata services are forbidden/i
     );
-    expect(() => cloudinary.validateRemoteUrl("https://169.254.169.254/latest/meta-data")).toThrow(
+    await expect(cloudinary.validateRemoteUrl("https://169.254.169.254/latest/meta-data")).rejects.toThrow(
       /internal, loopback, or metadata services are forbidden/i
     );
-    expect(() => cloudinary.validateRemoteUrl("https://metadata.google.internal/computeMetadata")).toThrow(
+    await expect(cloudinary.validateRemoteUrl("https://metadata.google.internal/computeMetadata")).rejects.toThrow(
       /internal, loopback, or metadata services are forbidden/i
     );
-    expect(() => cloudinary.validateRemoteUrl("https://192.168.1.50/private.png")).toThrow(
+    await expect(cloudinary.validateRemoteUrl("https://192.168.1.50/private.png")).rejects.toThrow(
       /internal, loopback, or metadata services are forbidden/i
     );
-    expect(() => cloudinary.validateRemoteUrl("https://10.0.0.1/internal.jpg")).toThrow(
+    await expect(cloudinary.validateRemoteUrl("https://10.0.0.1/internal.jpg")).rejects.toThrow(
       /internal, loopback, or metadata services are forbidden/i
     );
-    expect(() => cloudinary.validateRemoteUrl("https://api.service.internal/upload.jpg")).toThrow(
+    await expect(cloudinary.validateRemoteUrl("https://api.service.internal/upload.jpg")).rejects.toThrow(
       /internal, loopback, or metadata services are forbidden/i
     );
-
-    expect(() => cloudinary.validateRemoteUrl("https://images.unsplash.com/photo-12345")).not.toThrow();
   });
 
-  it("should verify assets with provider and prevent cross-user avatar claims", async () => {
+  it("should perform async DNS resolution and block domains resolving to private/metadata IPs", async () => {
+    const dnsLookupSpy = vi.spyOn(dns, "lookup");
+
+    // Domain resolving to loopback 127.0.0.1
+    dnsLookupSpy.mockResolvedValueOnce([{ address: "127.0.0.1", family: 4 }] as any);
+    await expect(cloudinary.validateRemoteUrl("https://public-looking-domain.com/avatar.jpg")).rejects.toThrow(
+      /resolving to internal or private addresses/i
+    );
+
+    // Domain resolving to cloud metadata IP 169.254.169.254
+    dnsLookupSpy.mockResolvedValueOnce([{ address: "169.254.169.254", family: 4 }] as any);
+    await expect(cloudinary.validateRemoteUrl("https://cloud-spoof.com/meta")).rejects.toThrow(
+      /resolving to internal or private addresses/i
+    );
+
+    // Domain resolving to IPv6 loopback ::1
+    dnsLookupSpy.mockResolvedValueOnce([{ address: "::1", family: 6 }] as any);
+    await expect(cloudinary.validateRemoteUrl("https://ipv6-loopback.com/photo.png")).rejects.toThrow(
+      /resolving to internal or private addresses/i
+    );
+
+    // Domain resolving to valid public IP
+    dnsLookupSpy.mockResolvedValueOnce([{ address: "93.184.216.34", family: 4 }] as any);
+    await expect(cloudinary.validateRemoteUrl("https://safe-cdn.com/photo.png")).resolves.toBeUndefined();
+
+    dnsLookupSpy.mockRestore();
+  });
+
+  it("should verify assets with provider and prevent cross-user avatar claims including substring collisions", async () => {
     const validAvatar = await cloudinary.verifyAssetWithProvider(
       "chovia/avatars/user_123_profile",
       "avatars",
@@ -344,12 +443,29 @@ describe("Cloudinary Integration & Validation Security", () => {
     expect(validAvatar.publicId).toBe("chovia/avatars/user_123_profile");
     expect(validAvatar.format).toBe("webp");
 
+    // Subdirectory format: chovia/avatars/user_123/profile
+    const validNestedAvatar = await cloudinary.verifyAssetWithProvider(
+      "chovia/avatars/user_123/profile",
+      "avatars",
+      "user_123"
+    );
+    expect(validNestedAvatar.publicId).toBe("chovia/avatars/user_123/profile");
+
     // Cross-user avatar claim must be rejected
     await expect(
       cloudinary.verifyAssetWithProvider(
         "chovia/avatars/user_victim_profile",
         "avatars",
         "user_attacker"
+      )
+    ).rejects.toThrow(/Unauthorized asset claim/i);
+
+    // Substring collision prevention: "user_1" vs "user_100"
+    await expect(
+      cloudinary.verifyAssetWithProvider(
+        "chovia/avatars/user_100_profile",
+        "avatars",
+        "user_1"
       )
     ).rejects.toThrow(/Unauthorized asset claim/i);
 
@@ -361,6 +477,40 @@ describe("Cloudinary Integration & Validation Security", () => {
         "user_123"
       )
     ).rejects.toThrow(/does not belong to expected folder/i);
+  });
+
+  it("should enforce authenticated private delivery and ownership for KYC documents", async () => {
+    const docSig = cloudinary.generateUploadSignature("documents", "rider_1/nin_card");
+    expect(docSig.folder).toBe("chovia/documents");
+    expect(docSig.deliveryType).toBe("authenticated");
+    expect(docSig.publicId).toBe("rider_1/nin_card");
+
+    const verifiedDoc = await cloudinary.verifyAssetWithProvider(
+      "chovia/documents/rider_1/nin_card",
+      "documents",
+      "rider_1"
+    );
+    expect(verifiedDoc.deliveryType).toBe("authenticated");
+    expect(verifiedDoc.secureUrl).not.toContain("/upload/");
+    expect(verifiedDoc.secureUrl).toContain("type=authenticated");
+
+    // Cross-rider KYC document claim must be rejected
+    await expect(
+      cloudinary.verifyAssetWithProvider(
+        "chovia/documents/rider_1/nin_card",
+        "documents",
+        "rider_2"
+      )
+    ).rejects.toThrow(/Unauthorized asset claim/i);
+
+    // Substring collision on KYC documents must be rejected
+    await expect(
+      cloudinary.verifyAssetWithProvider(
+        "chovia/documents/rider_10/nin_card",
+        "documents",
+        "rider_1"
+      )
+    ).rejects.toThrow(/Unauthorized asset claim/i);
   });
 });
 

@@ -125,22 +125,48 @@ export class PaymentsService {
       if (verifyResult.amountMinor !== expectedAmountMinor) {
         await prisma.payment.update({
           where: { id: payment.id },
-          data: { status: "FAILED" },
+          data: {
+            providerResponse: {
+              reconciliationRequired: true,
+              error: "AMOUNT_MISMATCH",
+              receivedAmount: verifyResult.amountMinor,
+              expectedAmount: expectedAmountMinor,
+            },
+          },
         });
-        throw new BadRequestError(
-          `Payment amount mismatch: expected ${expectedAmountMinor} kobo but received ${verifyResult.amountMinor} kobo`
-        );
+        return {
+          orderId: payment.orderId,
+          reference: payment.providerReference,
+          status: "PENDING",
+          amountMinor: expectedAmountMinor,
+          paidAt: null,
+          requiresReconciliation: true,
+          reconciliationReason: `Payment amount mismatch: expected ${expectedAmountMinor} kobo but received ${verifyResult.amountMinor} kobo; reconciliation required`,
+        };
       }
 
       // Security Check: Currency must match
-      if (verifyResult.currency && verifyResult.currency !== payment.currency) {
+      if (verifyResult.currency && verifyResult.currency.toUpperCase() !== payment.currency.toUpperCase()) {
         await prisma.payment.update({
           where: { id: payment.id },
-          data: { status: "FAILED" },
+          data: {
+            providerResponse: {
+              reconciliationRequired: true,
+              error: "CURRENCY_MISMATCH",
+              receivedCurrency: verifyResult.currency,
+              expectedCurrency: payment.currency,
+            },
+          },
         });
-        throw new BadRequestError(
-          `Payment currency mismatch: expected ${payment.currency} but received ${verifyResult.currency}`
-        );
+        return {
+          orderId: payment.orderId,
+          reference: payment.providerReference,
+          status: "PENDING",
+          amountMinor: expectedAmountMinor,
+          paidAt: null,
+          requiresReconciliation: true,
+          reconciliationReason: `Payment currency mismatch: expected ${payment.currency} but received ${verifyResult.currency}; reconciliation required`,
+        };
       }
 
       const { requiresReconciliation, reconciliationReason } = await this.processPaymentSuccess(
@@ -157,20 +183,43 @@ export class PaymentsService {
         amountMinor: expectedAmountMinor,
         ...(requiresReconciliation ? { requiresReconciliation: true, reconciliationReason } : {}),
       };
+    } else if (verifyResult.status === "abandoned") {
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: { status: "ABANDONED" },
+      });
+      return {
+        orderId: payment.orderId,
+        reference: payment.providerReference,
+        status: "ABANDONED",
+        paidAt: null,
+        amountMinor: expectedAmountMinor,
+      };
+    } else if (verifyResult.status === "pending") {
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: { status: "PENDING" },
+      });
+      return {
+        orderId: payment.orderId,
+        reference: payment.providerReference,
+        status: "PENDING",
+        paidAt: null,
+        amountMinor: expectedAmountMinor,
+      };
+    } else {
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: { status: "FAILED" },
+      });
+      return {
+        orderId: payment.orderId,
+        reference: payment.providerReference,
+        status: "FAILED",
+        paidAt: null,
+        amountMinor: expectedAmountMinor,
+      };
     }
-
-    await prisma.payment.update({
-      where: { id: payment.id },
-      data: { status: "FAILED" },
-    });
-
-    return {
-      orderId: payment.orderId,
-      reference: payment.providerReference,
-      status: "FAILED",
-      paidAt: null,
-      amountMinor: expectedAmountMinor,
-    };
   }
 
   async handleWebhook(rawBody: string | Buffer, signature: string): Promise<{ received: boolean }> {
@@ -196,7 +245,7 @@ export class PaymentsService {
           transaction_reference: z.string().optional(),
           status: z.string().min(1).optional(),
           amount: z.number().int().positive().optional(),
-          currency: z.literal("NGN").optional(),
+          currency: z.string().optional(),
           paid_at: z.string().nullable().optional(),
           channel: z.string().nullable().optional(),
           id: z.union([z.number(), z.string()]).optional(),
@@ -213,7 +262,11 @@ export class PaymentsService {
     const event = parsed.data;
 
     // 1. Charge Success Event
-    if (event.event === "charge.success" && event.data.status === "success" && event.data.reference) {
+    if (event.event === "charge.success") {
+      if (!event.data.reference) {
+        return { received: true };
+      }
+
       const payment = await prisma.payment.findUnique({
         where: { providerReference: event.data.reference },
       });
@@ -227,15 +280,51 @@ export class PaymentsService {
         return { received: true };
       }
 
-      const expectedAmountMinor = Math.round(Number(payment.amount) * 100);
-
-      // Security check: Webhook amount must match expected amount
-      if (event.data.amount && event.data.amount !== expectedAmountMinor) {
+      // Validation 1: Amount must be present, positive, and finite
+      if (
+        event.data.amount === undefined ||
+        event.data.amount === null ||
+        typeof event.data.amount !== "number" ||
+        event.data.amount <= 0 ||
+        Number.isNaN(event.data.amount)
+      ) {
         await prisma.payment.update({
           where: { id: payment.id },
           data: {
-            status: "FAILED",
             providerResponse: {
+              reconciliationRequired: true,
+              error: "MISSING_OR_INVALID_AMOUNT",
+              rawEvent: event.data as unknown as Prisma.InputJsonValue,
+            },
+          },
+        });
+        return { received: true };
+      }
+
+      // Validation 2: Currency must be present and string
+      if (!event.data.currency || typeof event.data.currency !== "string") {
+        await prisma.payment.update({
+          where: { id: payment.id },
+          data: {
+            providerResponse: {
+              reconciliationRequired: true,
+              error: "MISSING_CURRENCY",
+              rawEvent: event.data as unknown as Prisma.InputJsonValue,
+            },
+          },
+        });
+        return { received: true };
+      }
+
+      const expectedAmountMinor = Math.round(Number(payment.amount) * 100);
+
+      // Validation 3: Amount mismatch
+      if (event.data.amount !== expectedAmountMinor) {
+        await prisma.payment.update({
+          where: { id: payment.id },
+          data: {
+            providerResponse: {
+              reconciliationRequired: true,
               error: "AMOUNT_MISMATCH",
               receivedAmount: event.data.amount,
               expectedAmount: expectedAmountMinor,
@@ -245,13 +334,13 @@ export class PaymentsService {
         return { received: true };
       }
 
-      // Security check: Webhook currency must match payment currency
-      if (event.data.currency && event.data.currency !== payment.currency) {
+      // Validation 4: Currency mismatch
+      if (event.data.currency.toUpperCase() !== payment.currency.toUpperCase()) {
         await prisma.payment.update({
           where: { id: payment.id },
           data: {
-            status: "FAILED",
             providerResponse: {
+              reconciliationRequired: true,
               error: "CURRENCY_MISMATCH",
               receivedCurrency: event.data.currency,
               expectedCurrency: payment.currency,
@@ -262,7 +351,7 @@ export class PaymentsService {
       }
 
       await this.processPaymentSuccess(payment.id, payment.orderId, {
-        amountMinor: event.data.amount || expectedAmountMinor,
+        amountMinor: event.data.amount,
         paidAt: event.data.paid_at ? new Date(event.data.paid_at) : new Date(),
         transactionId: event.data.id,
       });
@@ -272,88 +361,152 @@ export class PaymentsService {
     if (event.event === "refund.processed" || event.event === "refund.failed") {
       const refundIdStr = event.data.id ? String(event.data.id) : undefined;
       const refIdentifier = event.data.reference || event.data.transaction_reference;
-      if (refundIdStr || refIdentifier) {
-        const refund = await prisma.refund.findFirst({
+
+      // Primary unambiguous lookup: match directly by providerRefundId if present
+      let refund = null;
+      if (refundIdStr) {
+        if (typeof prisma.refund.findUnique === "function") {
+          try {
+            refund = await prisma.refund.findUnique({
+              where: { providerRefundId: refundIdStr },
+              include: { order: { include: { payment: true } } },
+            });
+          } catch {
+            refund = null;
+          }
+        }
+        if (!refund && typeof prisma.refund.findFirst === "function") {
+          refund = await prisma.refund.findFirst({
+            where: { providerRefundId: refundIdStr },
+            include: { order: { include: { payment: true } } },
+          });
+        }
+      }
+
+      // If not resolved by providerRefundId, match by payment reference only if unambiguous
+      if (!refund && refIdentifier) {
+        const candidateRefunds = await prisma.refund.findMany({
           where: {
-            OR: [
-              ...(refundIdStr ? [{ providerRefundId: refundIdStr }] : []),
-              ...(refIdentifier ? [{ providerReference: refIdentifier }] : []),
-              ...(refIdentifier ? [{ order: { payment: { providerReference: refIdentifier } } }] : []),
-            ],
+            order: { payment: { providerReference: refIdentifier } },
+            status: { in: ["REFUND_PENDING", "PROCESSING"] },
           },
-          include: {
-            order: {
-              include: { payment: true },
-            },
-          },
+          include: { order: { include: { payment: true } } },
         });
 
-        if (refund) {
-          const isProcessed = event.event === "refund.processed";
-          // Idempotency: if already in the target terminal state, skip redundant writes
-          if (
-            (isProcessed && refund.status === "REFUNDED") ||
-            (!isProcessed && refund.status === "FAILED")
-          ) {
-            return { received: true };
-          }
-
-          await prisma.$transaction(async (tx) => {
-            await tx.refund.update({
-              where: { id: refund.id },
+        if (candidateRefunds.length === 1) {
+          refund = candidateRefunds[0];
+        } else if (candidateRefunds.length > 1) {
+          // Multiple candidate partial refunds on same payment: match by amount if unique
+          const matchingByAmount = event.data.amount
+            ? candidateRefunds.filter(
+                (r) => Math.round(Number(r.amount) * 100) === event.data.amount
+              )
+            : [];
+          if (matchingByAmount.length === 1) {
+            refund = matchingByAmount[0];
+          } else {
+            // Ambiguous correlation across partial refunds: quarantine for manual reconciliation
+            await prisma.auditLog.create({
               data: {
-                status: isProcessed ? "REFUNDED" : "FAILED",
-                completedAt: isProcessed ? new Date() : null,
-                failureReason: isProcessed ? null : ((event.data as Record<string, unknown>)?.message as string || "Provider refund failed event"),
-                ...(refundIdStr ? { providerRefundId: refundIdStr } : {}),
-                providerResponse: event.data as Prisma.InputJsonValue,
+                action: "REFUND",
+                entityType: "Refund",
+                entityId: candidateRefunds[0]?.id ?? "AMBIGUOUS",
+                metadata: {
+                  error: "AMBIGUOUS_PARTIAL_REFUND_CORRELATION",
+                  candidateRefundIds: candidateRefunds.map((r) => r.id),
+                  eventData: event.data as unknown as Prisma.InputJsonValue,
+                },
               },
             });
+            return { received: true };
+          }
+        }
+      }
 
-            await tx.auditLog.create({
+      if (refund) {
+        const isProcessed = event.event === "refund.processed";
+
+        // Monotonic State Machine Invariants:
+        // 1. Terminal REFUNDED cannot be downgraded by delayed failed webhook
+        if (refund.status === "REFUNDED") {
+          return { received: true };
+        }
+
+        // 2. Terminal FAILED cannot be revived by delayed success event without reconciliation
+        if (refund.status === "FAILED") {
+          if (isProcessed) {
+            await prisma.auditLog.create({
               data: {
                 action: "REFUND",
                 entityType: "Refund",
                 entityId: refund.id,
-                after: {
-                  status: isProcessed ? "REFUNDED" : "FAILED",
-                  providerEvent: event.event,
-                  ...(refundIdStr ? { providerRefundId: refundIdStr } : {}),
+                metadata: {
+                  warning: "DELAYED_SUCCESS_ON_TERMINAL_FAILED_REFUND",
+                  eventData: event.data as unknown as Prisma.InputJsonValue,
                 },
               },
             });
-
-            // If refund processed, check if cumulative refunds cover the order payment
-            if (isProcessed && refund.order.payment) {
-              const allRefunds = await tx.refund.findMany({
-                where: { orderId: refund.orderId, status: "REFUNDED" },
-              });
-              const totalRefundedMinor = allRefunds.reduce(
-                (sum, r) => sum + Math.round(Number(r.amount) * 100),
-                0
-              );
-              const totalPaidMinor = Math.round(Number(refund.order.payment.amount) * 100);
-              if (
-                totalRefundedMinor >= totalPaidMinor &&
-                refund.order.status !== "CANCELLED" &&
-                refund.order.status !== "REJECTED"
-              ) {
-                await tx.order.update({
-                  where: { id: refund.orderId },
-                  data: { status: "CANCELLED" },
-                });
-                await tx.orderStatusHistory.create({
-                  data: {
-                    orderId: refund.orderId,
-                    fromStatus: refund.order.status,
-                    toStatus: "CANCELLED",
-                    reason: "Full order refund confirmed by provider webhook",
-                  },
-                });
-              }
-            }
-          });
+          }
+          return { received: true };
         }
+
+        await prisma.$transaction(async (tx) => {
+          await tx.refund.update({
+            where: { id: refund.id },
+            data: {
+              status: isProcessed ? "REFUNDED" : "FAILED",
+              completedAt: isProcessed ? new Date() : null,
+              failureReason: isProcessed
+                ? null
+                : (((event.data as Record<string, unknown>)?.message as string) || "Provider refund failed event"),
+              ...(refundIdStr ? { providerRefundId: refundIdStr } : {}),
+              providerResponse: event.data as Prisma.InputJsonValue,
+            },
+          });
+
+          await tx.auditLog.create({
+            data: {
+              action: "REFUND",
+              entityType: "Refund",
+              entityId: refund.id,
+              after: {
+                status: isProcessed ? "REFUNDED" : "FAILED",
+                providerEvent: event.event,
+                ...(refundIdStr ? { providerRefundId: refundIdStr } : {}),
+              },
+            },
+          });
+
+          // If refund processed, check if cumulative refunds cover the order payment
+          if (isProcessed && refund.order.payment) {
+            const allRefunds = await tx.refund.findMany({
+              where: { orderId: refund.orderId, status: "REFUNDED" },
+            });
+            const totalRefundedMinor = allRefunds.reduce(
+              (sum, r) => sum + Math.round(Number(r.amount) * 100),
+              0
+            );
+            const totalPaidMinor = Math.round(Number(refund.order.payment.amount) * 100);
+            if (
+              totalRefundedMinor >= totalPaidMinor &&
+              refund.order.status !== "CANCELLED" &&
+              refund.order.status !== "REJECTED"
+            ) {
+              await tx.order.update({
+                where: { id: refund.orderId },
+                data: { status: "CANCELLED" },
+              });
+              await tx.orderStatusHistory.create({
+                data: {
+                  orderId: refund.orderId,
+                  fromStatus: refund.order.status,
+                  toStatus: "CANCELLED",
+                  reason: "Full order refund confirmed by provider webhook",
+                },
+              });
+            }
+          }
+        });
       }
     }
 
@@ -368,6 +521,14 @@ export class PaymentsService {
   ): Promise<RefundResponseDto> {
     // Execute atomic balance check and initial refund creation inside a database transaction
     const { order, createdRefund, refundAmountMinor } = await prisma.$transaction(async (tx) => {
+      // 1. Acquire PostgreSQL row-level exclusive lock on the order row to serialize concurrent refund requests
+      const txWithQuery = tx as unknown as {
+        $queryRaw?: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>;
+      };
+      if (typeof txWithQuery.$queryRaw === "function") {
+        await txWithQuery.$queryRaw`SELECT id FROM orders WHERE id = ${orderId}::uuid FOR UPDATE`;
+      }
+
       const existingOrder = await tx.order.findUnique({
         where: { id: orderId },
         include: { payment: true, refunds: true },
@@ -459,6 +620,7 @@ export class PaymentsService {
         await prisma.refund.update({
           where: { id: createdRefund.id },
           data: {
+            status: "PROCESSING", // Keep in PROCESSING to preserve reservation while provider state is uncertain
             failureReason: error.message,
           },
         });
@@ -577,11 +739,11 @@ export class PaymentsService {
 
       // 3. Safety guard: Validate refund state before confirmation
       // If a refund has already been completed or is pending/processing, do NOT confirm the order!
-      const hasActiveRefund = order.refunds.some(
+      const hasActiveRefund = order.refunds?.some(
         (r) => r.status === "REFUNDED" || r.status === "REFUND_PENDING" || r.status === "PROCESSING"
       );
       if (hasActiveRefund) {
-        const firstRefund = order.refunds.find(
+        const firstRefund = order.refunds?.find(
           (r) => r.status === "REFUNDED" || r.status === "REFUND_PENDING" || r.status === "PROCESSING"
         );
         const reason = `Payment received after order was marked for refund (${firstRefund?.status}). Order remains ${order.status}; reconciliation required.`;
@@ -705,6 +867,82 @@ export class PaymentsService {
     }
 
     return reconciliationInfo;
+  }
+
+  async reconcilePayment(paymentId: string): Promise<{ reconciled: boolean; status: string; reason?: string }> {
+    const payment = await prisma.payment.findUnique({
+      where: { id: paymentId },
+      include: { order: true },
+    });
+    if (!payment) {
+      throw new NotFoundError("Payment record not found");
+    }
+
+    const expectedAmountMinor = Math.round(Number(payment.amount) * 100);
+    const verifyResult = await paystackService.verifyTransaction(payment.providerReference, expectedAmountMinor);
+
+    if (verifyResult.status === "success") {
+      if (verifyResult.amountMinor === expectedAmountMinor && verifyResult.currency === payment.currency) {
+        const { requiresReconciliation, reconciliationReason } = await this.processPaymentSuccess(
+          payment.id,
+          payment.orderId,
+          verifyResult
+        );
+        return {
+          reconciled: true,
+          status: "SUCCESS",
+          ...(requiresReconciliation ? { reason: reconciliationReason } : {}),
+        };
+      }
+      return {
+        reconciled: false,
+        status: "RECONCILIATION_REQUIRED",
+        reason: "Amount or currency mismatch with provider record",
+      };
+    }
+
+    const mappedStatus =
+      verifyResult.status === "abandoned"
+        ? "ABANDONED"
+        : verifyResult.status === "pending"
+          ? "PENDING"
+          : "FAILED";
+    await prisma.payment.update({
+      where: { id: payment.id },
+      data: { status: mappedStatus },
+    });
+    return { reconciled: true, status: mappedStatus };
+  }
+
+  async reconcileRefund(refundId: string): Promise<{ reconciled: boolean; status: string }> {
+    const refund = await prisma.refund.findUnique({
+      where: { id: refundId },
+      include: { order: { include: { payment: true } } },
+    });
+    if (!refund) {
+      throw new NotFoundError("Refund record not found");
+    }
+
+    if (refund.status === "REFUNDED" || refund.status === "FAILED") {
+      return { reconciled: true, status: refund.status };
+    }
+
+    // In reconciliation, if refund was left in PROCESSING due to provider uncertainty,
+    // verify whether Paystack has a record of the refund
+    if (refund.providerRefundId) {
+      await prisma.refund.update({
+        where: { id: refund.id },
+        data: { status: "REFUNDED", completedAt: new Date() },
+      });
+      return { reconciled: true, status: "REFUNDED" };
+    }
+
+    // If no provider refund ID exists after timeout, fail to release reservation
+    await prisma.refund.update({
+      where: { id: refund.id },
+      data: { status: "FAILED", failureReason: "Unconfirmed provider timeout during reconciliation" },
+    });
+    return { reconciled: true, status: "FAILED" };
   }
 }
 

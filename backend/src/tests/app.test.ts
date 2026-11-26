@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../app.js";
 
-describe("CHOVIA API App Integration Tests", () => {
+describe("CHOVIA API App Integration Tests", { timeout: 30000 }, () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {

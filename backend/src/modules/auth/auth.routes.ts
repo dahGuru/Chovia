@@ -4,6 +4,8 @@ import type { AuthUserPayload } from "../../types/auth.js";
 import { authService } from "./auth.service.js";
 import {
   registerRequestSchema,
+  riderRegisterRequestSchema,
+  riderRegisterResponseSchema,
   loginRequestSchema,
   refreshTokenRequestSchema,
   logoutRequestSchema,
@@ -37,6 +39,31 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const body = registerRequestSchema.parse(request.body);
       const result = await authService.register(body);
+      return reply.status(201).send(result);
+    }
+  );
+
+  fastify.post(
+    "/rider/register",
+    {
+      config: {
+        rateLimit: {
+          max: 10,
+          timeWindow: "1 minute",
+        },
+      },
+      schema: {
+        description: "Register a new rider account with a PENDING rider profile",
+        tags: ["Auth"],
+        body: riderRegisterRequestSchema,
+        response: {
+          201: riderRegisterResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const body = riderRegisterRequestSchema.parse(request.body);
+      const result = await authService.registerRider(body);
       return reply.status(201).send(result);
     }
   );

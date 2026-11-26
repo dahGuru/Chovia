@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { AUTH_CONSTRAINTS } from "@chovia/validation";
 
+const STRICT_E164_PHONE_REGEX = /^\+[1-9]\d{7,14}$/;
+
 export const registerRequestSchema = z
   .object({
     email: z
@@ -21,12 +23,15 @@ export const registerRequestSchema = z
     lastName: z.string().min(1, "Last name is required").max(100).trim(),
     phone: z
       .string()
-      .regex(AUTH_CONSTRAINTS.phone.pattern, AUTH_CONSTRAINTS.phone.message)
-      .trim(),
+      .trim()
+      .regex(STRICT_E164_PHONE_REGEX, "Phone number must be a valid E.164 number (e.g. +2348012345678)"),
   })
   .strict();
 
 export type RegisterRequestDto = z.infer<typeof registerRequestSchema>;
+
+export const riderRegisterRequestSchema = registerRequestSchema;
+export type RiderRegisterRequestDto = z.infer<typeof riderRegisterRequestSchema>;
 
 export const loginRequestSchema = z
   .object({
@@ -160,3 +165,23 @@ export const messageResponseSchema = z
   .strict();
 
 export type MessageResponseDto = z.infer<typeof messageResponseSchema>;
+
+export const riderProfileSummarySchema = z
+  .object({
+    id: z.string().uuid(),
+    status: z.enum(["PENDING", "ACTIVE", "SUSPENDED", "DEACTIVATED"]),
+    isOnline: z.boolean(),
+    isAvailable: z.boolean(),
+  })
+  .strict();
+
+export const riderRegisterResponseSchema = z
+  .object({
+    user: userResponseSchema,
+    otpData: otpSentResponseSchema,
+    riderProfile: riderProfileSummarySchema,
+    emailDeliveryStatus: z.enum(["SENT", "FAILED_RETRYABLE"]),
+  })
+  .strict();
+
+export type RiderRegisterResponseDto = z.infer<typeof riderRegisterResponseSchema>;

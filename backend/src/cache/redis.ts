@@ -40,7 +40,10 @@ export function parseRedisUrl(redisUrl: string): RedisOptions {
   // Reject localhost in production or staging
   if (
     (env.NODE_ENV === "production" || env.NODE_ENV === "staging") &&
-    (url.hostname === "localhost" || url.hostname === "127.0.0.1")
+    (url.hostname === "localhost" ||
+      url.hostname === "127.0.0.1" ||
+      url.hostname === "::1" ||
+      url.hostname === "[::1]")
   ) {
     throw new Error(`Localhost Redis URL is strictly forbidden in ${env.NODE_ENV}`);
   }

@@ -51,6 +51,52 @@ export function isValidPhoneNumber(phone: string): boolean {
   return typeof phone === "string" && AUTH_CONSTRAINTS.phone.pattern.test(phone);
 }
 
+const E164_STRICT_REGEX = /^\+[1-9]\d{7,14}$/;
+const NG_LOCAL_REGEX = /^0[1-9]\d{9}$/;
+const NG_NO_PLUS_REGEX = /^234[1-9]\d{9}$/;
+
+/**
+ * Normalizes Nigerian local phone numbers (e.g. "08054093095" or "0805 409 3095")
+ * and valid international E.164 numbers into strict E.164 format ("+2348054093095").
+ * Returns null if the input cannot be safely normalized into a valid E.164 number.
+ */
+export function normalizeNigerianPhone(raw: string): string | null {
+  if (typeof raw !== "string") {
+    return null;
+  }
+
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  // Strip common formatting separators (spaces, hyphens, parentheses, dots)
+  const compact = trimmed.replace(/[\s\-().]/g, "");
+
+  // Reject any input containing unexpected characters or multiple '+' signs
+  if (!/^\+?\d+$/.test(compact)) {
+    return null;
+  }
+
+  if (compact.startsWith("+")) {
+    // Nigerian +234 numbers cannot have a leading '0' trunk prefix after country code
+    if (compact.startsWith("+2340")) {
+      return null;
+    }
+    return E164_STRICT_REGEX.test(compact) ? compact : null;
+  }
+
+  if (NG_LOCAL_REGEX.test(compact)) {
+    return `+234${compact.slice(1)}`;
+  }
+
+  if (NG_NO_PLUS_REGEX.test(compact)) {
+    return `+${compact}`;
+  }
+
+  return null;
+}
+
 export function isValidLatitude(lat: number): boolean {
   return (
     typeof lat === "number" &&

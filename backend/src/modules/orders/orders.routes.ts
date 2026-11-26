@@ -8,6 +8,7 @@ import {
   rejectOrderRequestSchema,
   listOrdersQuerySchema,
   orderResponseSchema,
+  paginatedOrdersResponseSchema,
 } from "./dto/order.dto.js";
 
 export const ordersRoutes: FastifyPluginAsync = async (fastify) => {
@@ -37,12 +38,12 @@ export const ordersRoutes: FastifyPluginAsync = async (fastify) => {
     "/",
     {
       schema: {
-        description: "List orders for authenticated customer or restaurant staff",
+        description: "List orders scoped to authenticated customer, rider, restaurant staff, or admin",
         tags: ["Orders"],
         security: [{ bearerAuth: [] }],
         querystring: listOrdersQuerySchema,
         response: {
-          200: z.array(orderResponseSchema),
+          200: paginatedOrdersResponseSchema,
         },
       },
     },
@@ -90,7 +91,7 @@ export const ordersRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = cancelOrderRequestSchema.parse(request.body);
-      const order = await ordersService.cancelOrder(request.user.id, id, body);
+      const order = await ordersService.cancelOrder(request.user.id, request.user.role, id, body);
       return reply.status(200).send(order);
     }
   );

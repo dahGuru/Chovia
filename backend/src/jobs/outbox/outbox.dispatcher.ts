@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { prisma } from "../../database/prisma.js";
 import { enqueuePushNotification, enqueueDeliveryTimeoutCheck } from "../queues/index.js";
 import type { SendPushNotificationJobData, CheckDeliveryTimeoutJobData } from "../types/jobs.types.js";
@@ -14,12 +15,16 @@ export class OutboxDispatcher {
    * Recovers events stuck in PROCESSING due to worker crashes or lease expiration.
    */
   async recoverStaleProcessingEvents(leaseDurationMs = DEFAULT_LEASE_DURATION_MS): Promise<number> {
+    const now = new Date();
     const staleThreshold = new Date(Date.now() - leaseDurationMs);
 
     const staleEvents = await prisma.outboxEvent.findMany({
       where: {
         status: "PROCESSING",
-        updatedAt: { lte: staleThreshold },
+        OR: [
+          { leaseExpiresAt: { lte: now } },
+          { leaseExpiresAt: null, updatedAt: { lte: staleThreshold } },
+        ],
       },
       take: 50,
     });
@@ -36,7 +41,6 @@ export class OutboxDispatcher {
         where: {
           id: event.id,
           status: "PROCESSING",
-          updatedAt: { lte: staleThreshold },
         },
         data: {
           status: isTerminal ? "FAILED" : "PENDING",
@@ -44,6 +48,8 @@ export class OutboxDispatcher {
           lastError: isTerminal
             ? `Lease expired after ${event.attempts} attempts; marked FAILED.`
             : `Lease expired after ${event.attempts} attempts; recovered for retry.`,
+          claimToken: null,
+          leaseExpiresAt: null,
         },
       });
 
@@ -73,12 +79,17 @@ export class OutboxDispatcher {
     let dispatchedCount = 0;
 
     for (const event of pendingEvents) {
-      // 2. Safe atomic claim under concurrent workers
+      const claimToken = crypto.randomUUID();
+      const leaseExpiresAt = new Date(Date.now() + DEFAULT_LEASE_DURATION_MS);
+
+      // 2. Safe atomic claim under concurrent workers with explicit lease semantics
       const claimResult = await prisma.outboxEvent.updateMany({
         where: { id: event.id, status: "PENDING" },
         data: {
           status: "PROCESSING",
           attempts: { increment: 1 },
+          claimToken,
+          leaseExpiresAt,
         },
       });
 
@@ -105,17 +116,25 @@ export class OutboxDispatcher {
             throw new Error(`Unsupported outbox eventType: ${event.eventType}`);
         }
 
-        // 3. Mark event DISPATCHED
-        await prisma.outboxEvent.update({
-          where: { id: event.id },
+        // 3. Mark event DISPATCHED conditionally on matching claimToken
+        const markResult = await prisma.outboxEvent.updateMany({
+          where: {
+            id: event.id,
+            claimToken,
+            status: "PROCESSING",
+          },
           data: {
             status: "DISPATCHED",
             processedAt: new Date(),
             lastError: null,
+            claimToken: null,
+            leaseExpiresAt: null,
           },
         });
 
-        dispatchedCount++;
+        if (markResult.count > 0) {
+          dispatchedCount++;
+        }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Unknown outbox error";
         const currentAttempts = event.attempts + 1;
@@ -126,12 +145,18 @@ export class OutboxDispatcher {
         const jitter = Math.floor(Math.random() * 5);
         const nextScheduledAt = new Date(Date.now() + (backoffSeconds + jitter) * 1000);
 
-        await prisma.outboxEvent.update({
-          where: { id: event.id },
+        await prisma.outboxEvent.updateMany({
+          where: {
+            id: event.id,
+            claimToken,
+            status: "PROCESSING",
+          },
           data: {
             status: isTerminal ? "FAILED" : "PENDING",
             scheduledAt: nextScheduledAt,
             lastError: errorMessage,
+            claimToken: null,
+            leaseExpiresAt: null,
           },
         });
       }

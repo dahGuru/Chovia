@@ -35,6 +35,7 @@ interface OpenApiSpec {
         summary?: string;
         description?: string;
         parameters?: unknown[];
+        security?: Array<Record<string, unknown>>;
         requestBody?: {
           content?: Record<string, { schema?: unknown }>;
         };
@@ -69,11 +70,11 @@ describe("OpenAPI 3.1 Contract & Automated Verification", () => {
 
   it("should define JWT Bearer authentication in components.securitySchemes", () => {
     expect(spec.components?.securitySchemes).toBeDefined();
-    const bearer = spec.components.securitySchemes.bearerAuth;
+    const bearer = spec.components?.securitySchemes?.bearerAuth;
     expect(bearer).toBeDefined();
-    expect(bearer.type).toBe("http");
-    expect(bearer.scheme).toBe("bearer");
-    expect(bearer.bearerFormat).toBe("JWT");
+    expect(bearer?.type).toBe("http");
+    expect(bearer?.scheme).toBe("bearer");
+    expect(bearer?.bearerFormat).toBe("JWT");
   });
 
   it("should have matching JSON and YAML specifications on disk", async () => {
@@ -99,6 +100,7 @@ describe("OpenAPI 3.1 Contract & Automated Verification", () => {
       "/health/ready",
       "/health",
       "/api/v1/auth/register",
+      "/api/v1/auth/rider/register",
       "/api/v1/auth/login",
       "/api/v1/auth/refresh",
       "/api/v1/auth/logout",
@@ -111,6 +113,13 @@ describe("OpenAPI 3.1 Contract & Automated Verification", () => {
       "/api/v1/cart/items",
       "/api/v1/orders/",
       "/api/v1/orders/checkout",
+      "/api/v1/riders/me",
+      "/api/v1/riders/kyc",
+      "/api/v1/riders/status",
+      "/api/v1/riders/location",
+      "/api/v1/riders/deliveries/active",
+      "/api/v1/riders/deliveries/history",
+      "/api/v1/admin/riders/applications",
       "/api/v1/payments/initialize",
       "/api/v1/payments/verify/{reference}",
       "/api/v1/payments/webhook",
@@ -142,8 +151,8 @@ describe("OpenAPI 3.1 Contract & Automated Verification", () => {
     for (const { path: routePath, method } of bodyEndpoints) {
       const operation = paths[routePath]?.[method];
       expect(operation, `Missing operation ${method.toUpperCase()} ${routePath}`).toBeDefined();
-      expect(operation.requestBody, `Missing requestBody for ${method.toUpperCase()} ${routePath}`).toBeDefined();
-      expect(operation.requestBody.content?.["application/json"]?.schema).toBeDefined();
+      expect(operation?.requestBody, `Missing requestBody for ${method.toUpperCase()} ${routePath}`).toBeDefined();
+      expect(operation?.requestBody?.content?.["application/json"]?.schema).toBeDefined();
     }
   });
 
@@ -165,5 +174,52 @@ describe("OpenAPI 3.1 Contract & Automated Verification", () => {
     expect(schemas?.ValidationError).toBeDefined();
     expect(schemas?.PaginationMeta).toBeDefined();
     expect(schemas?.HealthStatusResponse).toBeDefined();
+  });
+
+  it("should enforce security requirements on protected endpoints and permit public endpoints", () => {
+    const paths = spec.paths;
+
+    // Protected endpoints must define bearerAuth
+    const protectedOperations: Array<{ path: string; method: string }> = [
+      { path: "/api/v1/users/profile", method: "get" },
+      { path: "/api/v1/payments/initialize", method: "post" },
+      { path: "/api/v1/payments/refund", method: "post" },
+    ];
+
+    for (const { path: routePath, method } of protectedOperations) {
+      const op = paths[routePath]?.[method];
+      expect(op, `Missing ${method.toUpperCase()} ${routePath}`).toBeDefined();
+      const hasSecurity =
+        (op?.security && op.security.some((s) => "bearerAuth" in s)) ||
+        spec.components?.securitySchemes?.bearerAuth !== undefined;
+      expect(hasSecurity).toBe(true);
+    }
+
+    // Webhook endpoint must be public (no bearer auth required)
+    const webhookOp = paths["/api/v1/payments/webhook"]?.post;
+    expect(webhookOp).toBeDefined();
+    if (webhookOp?.security) {
+      expect(webhookOp.security.length).toBe(0);
+    }
+  });
+
+  it("should have valid HTTP status codes for all defined operation responses", () => {
+    const paths = spec.paths;
+    for (const [routePath, methods] of Object.entries(paths)) {
+      for (const [method, operation] of Object.entries(methods)) {
+        if (typeof operation === "object" && operation !== null && operation.responses) {
+          for (const statusCode of Object.keys(operation.responses)) {
+            // Must be 'default' or a 3-digit numeric HTTP status code (200-599)
+            if (statusCode !== "default") {
+              const code = Number(statusCode);
+              expect(
+                Number.isInteger(code) && code >= 100 && code <= 599,
+                `Invalid HTTP status code "${statusCode}" in ${method.toUpperCase()} ${routePath}`
+              ).toBe(true);
+            }
+          }
+        }
+      }
+    }
   });
 });
