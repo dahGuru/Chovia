@@ -78,7 +78,7 @@ export default function CustomerHomeScreen() {
     [notifications]
   );
 
-  const restaurants = restaurantsData?.restaurants ?? [];
+  const restaurants = restaurantsData?.items ?? [];
 
   return (
     <SafeAreaView className="flex-1 bg-chovia-background" edges={["top"]}>

@@ -87,14 +87,21 @@ export default function CustomerOtpScreen() {
     if (!email || cooldown > 0 || resending) return;
     setResending(true);
     setServerError(null);
+    setSuccessNotice(null);
     try {
       const res =
         mode === "verify-email"
           ? await authService.requestEmailVerification(email)
           : await authService.requestPasswordReset(email);
-      setSignedToken(res.signedToken);
-      setCooldown(45);
-      setSuccessNotice("A new 6-digit code has been sent to your email.");
+      if (res.signedToken) {
+        setSignedToken(res.signedToken);
+        setCooldown(45);
+        setSuccessNotice("A new 6-digit code has been sent to your email.");
+      } else if (res.message.toLowerCase().includes("already verified")) {
+        setSuccessNotice("Your email address is already verified. You can log in now.");
+      } else {
+        setSuccessNotice(res.message);
+      }
     } catch (err) {
       setServerError(err instanceof ApiClientError ? err.message : "Failed to resend code.");
     } finally {
@@ -178,6 +185,24 @@ export default function CustomerOtpScreen() {
               </Text>
             </TouchableOpacity>
           </View>
+
+          {mode === "verify-email" && (
+            <TouchableOpacity
+              onPress={() =>
+                router.replace(
+                  email
+                    ? { pathname: "/(auth)/verify-email", params: { email } }
+                    : "/(auth)/verify-email"
+                )
+              }
+              activeOpacity={0.7}
+              className="mt-3 self-center"
+            >
+              <Text className="font-manrope-medium text-[13px] text-chovia-green">
+                Use a different email address
+              </Text>
+            </TouchableOpacity>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

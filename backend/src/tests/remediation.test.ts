@@ -1,14 +1,18 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "../database/prisma.js";
+import * as redisCache from "../cache/redis.js";
 import { authService } from "../modules/auth/auth.service.js";
 import { riderRegisterRequestSchema } from "../modules/auth/dto/auth.dto.js";
 import { riderKycService } from "../modules/delivery/rider-kyc.service.js";
 import { deliveryService } from "../modules/delivery/delivery.service.js";
 import { ordersService } from "../modules/orders/orders.service.js";
+import { restaurantsService } from "../modules/restaurants/restaurants.service.js";
 import { emailService } from "../integrations/email/email.service.js";
 import { cloudinaryService } from "../integrations/cloudinary/cloudinary.service.js";
+import { createOtpSignature } from "../utils/crypto.js";
 import { decryptSensitiveValue } from "../utils/encryption.js";
+import { buildApp } from "../app.js";
 import {
   BadRequestError,
   ConflictError,
@@ -141,7 +145,11 @@ describe("Integration Remediation: Rider Registration, KYC, GPS, Orders & Authz"
       );
 
       let capturedUpsertCreate: any = null;
-      vi.spyOn(prisma, "$transaction").mockImplementation(async (cb: any) => {
+      let capturedTxOptions: any = null;
+      const createManySpy = vi.fn().mockResolvedValue({ count: 3 });
+
+      vi.spyOn(prisma, "$transaction").mockImplementation(async (cb: any, opts?: any) => {
+        capturedTxOptions = opts;
         const tx = {
           riderProfile: { update: vi.fn().mockResolvedValue({}) },
           riderKycApplication: {
@@ -149,49 +157,52 @@ describe("Integration Remediation: Rider Registration, KYC, GPS, Orders & Authz"
               capturedUpsertCreate = args.create;
               return { id: "33333333-3333-4333-8333-333333333333", ...args.create };
             }),
-            findUniqueOrThrow: vi.fn().mockResolvedValue({
-              id: "33333333-3333-4333-8333-333333333333",
-              riderProfileId: riderId,
-              status: "UNDER_REVIEW",
-              firstName: "Daniel",
-              lastName: "Okafor",
-              phone: "+2348054093095",
-              operatingCity: "Ekpoma",
-              homeAddress: null,
-              vehicleType: "MOTORCYCLE",
-              vehiclePlateNumber: "EDO-452-AB",
-              governmentIdType: "NIN",
-              governmentIdMasked: "*******8901",
-              bankName: "Access Bank",
-              bankCode: null,
-              accountHolderName: "Daniel Okafor",
-              bankAccountMasked: "******6789",
-              submittedAt: new Date("2026-11-26T10:05:00.000Z"),
-              reviewedAt: null,
-              rejectionReason: null,
-              reviewNotes: null,
-              riderProfile: { status: "PENDING", userId, user: { email: "rider@chovia.app" } },
-              documents: [
-                {
-                  id: "44444444-4444-4444-8444-444444444444",
-                  documentType: "GOVERNMENT_ID",
-                  publicId: `chovia/documents/${userId}/id_front`,
-                  resourceType: "image",
-                  deliveryType: "authenticated",
-                  format: "jpg",
-                  bytes: 51200,
-                  verifiedAt: new Date("2026-11-26T10:05:00.000Z"),
-                },
-              ],
-            }),
           },
           riderDocument: {
             deleteMany: vi.fn().mockResolvedValue({}),
-            create: vi.fn().mockResolvedValue({}),
+            createMany: createManySpy,
           },
         };
         return cb(tx);
       });
+
+      const postCommitFindSpy = vi
+        .spyOn(prisma.riderKycApplication, "findUniqueOrThrow")
+        .mockResolvedValue({
+          id: "33333333-3333-4333-8333-333333333333",
+          riderProfileId: riderId,
+          status: "UNDER_REVIEW",
+          firstName: "Daniel",
+          lastName: "Okafor",
+          phone: "+2348054093095",
+          operatingCity: "Ekpoma",
+          homeAddress: null,
+          vehicleType: "MOTORCYCLE",
+          vehiclePlateNumber: "EDO-452-AB",
+          governmentIdType: "NIN",
+          governmentIdMasked: "*******8901",
+          bankName: "Access Bank",
+          bankCode: null,
+          accountHolderName: "Daniel Okafor",
+          bankAccountMasked: "******6789",
+          submittedAt: new Date("2026-11-26T10:05:00.000Z"),
+          reviewedAt: null,
+          rejectionReason: null,
+          reviewNotes: null,
+          riderProfile: { status: "PENDING", userId, user: { email: "rider@chovia.app" } },
+          documents: [
+            {
+              id: "44444444-4444-4444-8444-444444444444",
+              documentType: "GOVERNMENT_ID",
+              publicId: `chovia/documents/${userId}/id_front`,
+              resourceType: "image",
+              deliveryType: "authenticated",
+              format: "jpg",
+              bytes: 51200,
+              verifiedAt: new Date("2026-11-26T10:05:00.000Z"),
+            },
+          ],
+        } as any);
 
       const response = await riderKycService.submitApplication(userId, {
         firstName: "Daniel",
@@ -212,6 +223,11 @@ describe("Integration Remediation: Rider Registration, KYC, GPS, Orders & Authz"
         ],
       });
 
+      expect(capturedTxOptions).toEqual({ maxWait: 5000, timeout: 15000 });
+      expect(createManySpy).toHaveBeenCalledTimes(1);
+      expect(createManySpy.mock.calls[0]?.[0]?.data).toHaveLength(3);
+      expect(postCommitFindSpy).toHaveBeenCalledTimes(1);
+
       expect(capturedUpsertCreate).toBeTruthy();
       expect(capturedUpsertCreate.encryptedGovernmentId).not.toContain("12345678901");
       expect(capturedUpsertCreate.encryptedBankAccountNumber).not.toContain("0123456789");
@@ -223,6 +239,123 @@ describe("Integration Remediation: Rider Registration, KYC, GPS, Orders & Authz"
       expect(response.riderStatus).toBe("PENDING");
       expect(response.documents[0]?.deliveryType).toBe("authenticated");
       expect(response.documents[0]?.signedAccessUrl).not.toContain("/upload/");
+    });
+
+    it("cleans up ONLY newly uploaded Cloudinary docs on transaction failure and blocks concurrent submissions", async () => {
+      const userId = "11111111-1111-4111-8111-111111111111";
+      const riderId = "22222222-2222-4222-8222-222222222222";
+      const existingPublicId = `chovia/documents/${userId}/old_id`;
+      const newPublicId = `chovia/documents/${userId}/new_selfie`;
+
+      vi.spyOn(prisma.riderProfile, "findUnique").mockResolvedValue({
+        id: riderId,
+        userId,
+        status: "PENDING",
+        kycApplication: {
+          id: "33333333-3333-4333-8333-333333333333",
+          status: "REJECTED",
+          documents: [{ publicId: existingPublicId }],
+        },
+        user: { email: "rider@chovia.app" },
+      } as any);
+
+      vi.spyOn(cloudinaryService, "verifyAssetWithProvider").mockImplementation(
+        async (publicId) => ({
+          publicId,
+          secureUrl: `https://api.cloudinary.com/v1_1/chovia/download?public_id=${publicId}&type=authenticated`,
+          deliveryType: "authenticated",
+          resourceType: "image",
+          format: "jpg",
+          bytes: 51200,
+        })
+      );
+
+      const deleteSpy = vi
+        .spyOn(cloudinaryService, "deleteImage")
+        .mockResolvedValue(undefined);
+
+      vi.spyOn(prisma, "$transaction").mockRejectedValueOnce(new Error("Simulated DB failure"));
+
+      await expect(
+        riderKycService.submitApplication(userId, {
+          firstName: "Daniel",
+          lastName: "Okafor",
+          phone: "+2348054093095",
+          operatingCity: "Ekpoma",
+          vehicleType: "MOTORCYCLE",
+          vehiclePlateNumber: "EDO-452-AB",
+          governmentIdType: "NIN",
+          governmentIdNumber: "12345678901",
+          bankName: "Access Bank",
+          accountHolderName: "Daniel Okafor",
+          bankAccountNumber: "0123456789",
+          documents: [
+            { documentType: "GOVERNMENT_ID", publicId: existingPublicId },
+            { documentType: "SELFIE", publicId: newPublicId },
+          ],
+        })
+      ).rejects.toThrow("Simulated DB failure");
+
+      expect(deleteSpy).toHaveBeenCalledTimes(1);
+      expect(deleteSpy).toHaveBeenCalledWith(newPublicId, {
+        resourceType: "image",
+        deliveryType: "authenticated",
+      });
+      expect(deleteSpy).not.toHaveBeenCalledWith(existingPublicId, expect.anything());
+
+      // Concurrent submission lock when an attempt is already in flight
+      let resolveFirstTx: (() => void) | null = null;
+      vi.spyOn(prisma, "$transaction").mockImplementationOnce(
+        () =>
+          new Promise<string>((resolve) => {
+            resolveFirstTx = () => resolve("33333333-3333-4333-8333-333333333333");
+          })
+      );
+      vi.spyOn(prisma.riderKycApplication, "findUniqueOrThrow").mockResolvedValue({
+        id: "33333333-3333-4333-8333-333333333333",
+        riderProfileId: riderId,
+        status: "UNDER_REVIEW",
+        firstName: "Daniel",
+        lastName: "Okafor",
+        phone: "+2348054093095",
+        operatingCity: "Ekpoma",
+        homeAddress: null,
+        vehicleType: "MOTORCYCLE",
+        vehiclePlateNumber: "EDO-452-AB",
+        governmentIdType: "NIN",
+        governmentIdMasked: "*******8901",
+        bankName: "Access Bank",
+        bankCode: null,
+        accountHolderName: "Daniel Okafor",
+        bankAccountMasked: "******6789",
+        submittedAt: new Date("2026-11-26T10:05:00.000Z"),
+        reviewedAt: null,
+        rejectionReason: null,
+        reviewNotes: null,
+        riderProfile: { status: "PENDING", userId, user: { email: "rider@chovia.app" } },
+        documents: [],
+      } as any);
+
+      const payload = {
+        firstName: "Daniel",
+        lastName: "Okafor",
+        phone: "+2348054093095",
+        operatingCity: "Ekpoma",
+        vehicleType: "MOTORCYCLE" as const,
+        governmentIdType: "NIN" as const,
+        governmentIdNumber: "12345678901",
+        bankName: "Access Bank",
+        accountHolderName: "Daniel Okafor",
+        bankAccountNumber: "0123456789",
+        documents: [{ documentType: "GOVERNMENT_ID" as const, publicId: existingPublicId }],
+      };
+
+      const firstPromise = riderKycService.submitApplication(userId, payload);
+      await new Promise((r) => setTimeout(r, 20));
+      await expect(riderKycService.submitApplication(userId, payload)).rejects.toThrow(ConflictError);
+
+      resolveFirstTx?.();
+      await firstPromise;
     });
 
     it("activates RiderProfile only on admin approval and sets PENDING on admin rejection", async () => {
@@ -256,30 +389,6 @@ describe("Integration Remediation: Rider Registration, KYC, GPS, Orders & Authz"
         const tx = {
           riderKycApplication: {
             update: vi.fn().mockResolvedValue({ id: appId }),
-            findUniqueOrThrow: vi.fn().mockResolvedValue({
-              id: appId,
-              riderProfileId: riderId,
-              status: "APPROVED",
-              firstName: "Daniel",
-              lastName: "Okafor",
-              phone: "+2348054093095",
-              operatingCity: "Ekpoma",
-              homeAddress: null,
-              vehicleType: "MOTORCYCLE",
-              vehiclePlateNumber: "EDO-452-AB",
-              governmentIdType: "NIN",
-              governmentIdMasked: "*******8901",
-              bankName: "Access Bank",
-              bankCode: null,
-              accountHolderName: "Daniel Okafor",
-              bankAccountMasked: "******6789",
-              submittedAt: new Date(),
-              reviewedAt: new Date(),
-              rejectionReason: null,
-              reviewNotes: "Verified",
-              riderProfile: { status: "ACTIVE", userId: riderUserId, user: { email: "rider@chovia.app" } },
-              documents: [],
-            }),
           },
           riderProfile: { update: profileUpdateSpy },
           auditLog: { create: auditSpy },
@@ -287,6 +396,31 @@ describe("Integration Remediation: Rider Registration, KYC, GPS, Orders & Authz"
         };
         return cb(tx);
       });
+
+      vi.spyOn(prisma.riderKycApplication, "findUniqueOrThrow").mockResolvedValue({
+        id: appId,
+        riderProfileId: riderId,
+        status: "APPROVED",
+        firstName: "Daniel",
+        lastName: "Okafor",
+        phone: "+2348054093095",
+        operatingCity: "Ekpoma",
+        homeAddress: null,
+        vehicleType: "MOTORCYCLE",
+        vehiclePlateNumber: "EDO-452-AB",
+        governmentIdType: "NIN",
+        governmentIdMasked: "*******8901",
+        bankName: "Access Bank",
+        bankCode: null,
+        accountHolderName: "Daniel Okafor",
+        bankAccountMasked: "******6789",
+        submittedAt: new Date(),
+        reviewedAt: new Date(),
+        rejectionReason: null,
+        reviewNotes: "Verified",
+        riderProfile: { status: "ACTIVE", userId: riderUserId, user: { email: "rider@chovia.app" } },
+        documents: [],
+      } as any);
 
       const approved = await riderKycService.approveApplication(adminId, appId, "Verified");
       expect(approved.status).toBe("APPROVED");
@@ -504,5 +638,173 @@ describe("Integration Remediation: Rider Registration, KYC, GPS, Orders & Authz"
       const allowed = await deliveryService.trackDelivery("order-1", "cust-user-1", "CUSTOMER");
       expect(allowed.orderId).toBe("order-1");
     });
+  });
+
+  describe("5. Email Verification Recovery & OTP Supersession", () => {
+    it("handles unknown and already-verified emails without issuing tokens and issues recovery OTP for unverified users", async () => {
+      vi.spyOn(prisma.user, "findUnique").mockResolvedValueOnce(null);
+      const unknownRes = await authService.requestEmailVerification("nobody@chovia.app");
+      expect(unknownRes.signedToken).toBe("");
+
+      vi.spyOn(prisma.user, "findUnique").mockResolvedValueOnce({
+        id: "u-verified",
+        email: "verified@chovia.app",
+        emailVerified: true,
+      } as any);
+      const verifiedRes = await authService.requestEmailVerification("verified@chovia.app");
+      expect(verifiedRes.signedToken).toBe("");
+      expect(verifiedRes.message).toContain("already verified");
+
+      const cacheStore = new Map<string, string>();
+      vi.spyOn(redisCache, "cacheSet").mockImplementation(async (key, val) => {
+        cacheStore.set(key, String(val));
+      });
+      vi.spyOn(redisCache, "cacheGet").mockImplementation(async (key) => {
+        return (cacheStore.get(key) as any) ?? null;
+      });
+      vi.spyOn(redisCache, "cacheDel").mockImplementation(async (key) => {
+        cacheStore.delete(key);
+      });
+      vi.spyOn(redisCache, "atomicConsumeToken").mockResolvedValue(true);
+
+      vi.spyOn(prisma.user, "findUnique").mockResolvedValue({
+        id: "u-unverified",
+        email: "unverified@chovia.app",
+        emailVerified: false,
+      } as any);
+      vi.spyOn(prisma.user, "update").mockResolvedValue({
+        id: "u-unverified",
+        emailVerified: true,
+      } as any);
+
+      const sentOtps: string[] = [];
+      vi.spyOn(emailService, "sendVerificationEmail").mockImplementation(async (_email, otp) => {
+        sentOtps.push(otp);
+      });
+
+      const first = await authService.requestEmailVerification("unverified@chovia.app");
+      const firstOtp = sentOtps[0]!;
+      const second = await authService.requestEmailVerification("unverified@chovia.app");
+      const secondOtp = sentOtps[1]!;
+
+      expect(first.signedToken).toBeTruthy();
+      expect(second.signedToken).toBeTruthy();
+
+      await expect(
+        authService.verifyEmail("unverified@chovia.app", firstOtp, first.signedToken)
+      ).rejects.toThrow(BadRequestError);
+
+      const ok = await authService.verifyEmail(
+        "unverified@chovia.app",
+        secondOtp,
+        second.signedToken
+      );
+      expect(ok.success).toBe(true);
+    });
+
+    it("rejects expired OTP tokens explicitly", async () => {
+      const { signedToken } = createOtpSignature("expired@chovia.app", "123456", "VERIFY_EMAIL");
+      const [, hmac] = signedToken.split(".");
+      const expiredToken = `${Date.now() - 60000}.${hmac}`;
+
+      await expect(
+        authService.verifyEmail("expired@chovia.app", "123456", expiredToken)
+      ).rejects.toThrow(BadRequestError);
+    });
+  });
+
+  describe("6. Explore Restaurants, Menu Contract & Fastify Response Serialization Diagnostics", () => {
+    it("serializes GET /restaurants as { items, total, page, limit, totalPages } and filters by cuisine", async () => {
+      const app = await buildApp();
+      await app.ready();
+
+      try {
+        const restId = "11111111-1111-4111-8111-111111111111";
+        vi.spyOn(prisma.restaurant, "findMany").mockResolvedValueOnce([
+          {
+            id: restId,
+            name: "Jollof Republic",
+            description: "Smoky party jollof",
+            phone: "+2348054093095",
+            email: null,
+            address: "10 University Rd, Ekpoma",
+            latitude: 6.7429,
+            longitude: 6.1356,
+            maxDeliveryDistanceKm: 10,
+            status: "ACTIVE",
+            availability: "OPEN",
+            createdAt: new Date("2026-11-26T10:00:00.000Z"),
+            cuisines: [{ cuisineCategory: { name: "Nigerian" } }],
+          },
+        ] as any);
+        vi.spyOn(prisma.restaurant, "count").mockResolvedValueOnce(1);
+
+        const res = await app.inject({
+          method: "GET",
+          url: "/api/v1/restaurants?search=Nigerian&page=1&limit=20",
+        });
+
+        expect(res.statusCode).toBe(200);
+        const body = JSON.parse(res.body);
+        expect(Array.isArray(body.items)).toBe(true);
+        expect(body.restaurants).toBeUndefined();
+        expect(body.items).toHaveLength(1);
+        expect(body.total).toBe(1);
+        expect(body.totalPages).toBe(1);
+        expect(body.items[0].cuisines).toEqual(["Nigerian"]);
+
+        // Menu endpoint contract with nullable fields & empty category
+        vi.spyOn(prisma.restaurant, "findUnique").mockResolvedValueOnce({ id: restId } as any);
+        vi.spyOn(prisma.menuCategory, "findMany").mockResolvedValueOnce([
+          {
+            id: "22222222-2222-4222-8222-222222222222",
+            name: "Rice Specials",
+            description: null,
+            sortOrder: 1,
+            items: [
+              {
+                id: "33333333-3333-4333-8333-333333333333",
+                categoryId: "22222222-2222-4222-8222-222222222222",
+                name: "Party Jollof & Chicken",
+                description: null,
+                price: "4500.00",
+                maxQuantity: 10,
+                availability: "AVAILABLE",
+                imageUrl: null,
+                createdAt: new Date("2026-11-26T10:00:00.000Z"),
+              },
+            ],
+          },
+        ] as any);
+
+        const menuRes = await app.inject({
+          method: "GET",
+          url: `/api/v1/restaurants/${restId}/menu`,
+        });
+
+        expect(menuRes.statusCode).toBe(200);
+        const menuBody = JSON.parse(menuRes.body);
+        expect(Array.isArray(menuBody)).toBe(true);
+        expect(menuBody[0].items[0].priceMinor).toBe(450000);
+
+        // Diagnostic 500 response on ResponseSerializationError
+        vi.spyOn(restaurantsService, "list").mockResolvedValueOnce({
+          restaurants: [],
+        } as any);
+
+        const mismatchRes = await app.inject({
+          method: "GET",
+          url: "/api/v1/restaurants",
+        });
+
+        expect(mismatchRes.statusCode).toBe(500);
+        const mismatchBody = JSON.parse(mismatchRes.body);
+        expect(mismatchBody.code).toBe("RESPONSE_VALIDATION_ERROR");
+        expect(mismatchBody.details?.endpoint).toContain("/api/v1/restaurants");
+        expect(Array.isArray(mismatchBody.details?.issues)).toBe(true);
+      } finally {
+        await app.close();
+      }
+    }, 30000);
   });
 });

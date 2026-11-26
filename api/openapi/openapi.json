@@ -2262,7 +2262,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "restaurants": {
+                    "items": {
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -2320,7 +2320,10 @@
                             ]
                           },
                           "distanceKm": {
-                            "type": "number"
+                            "type": [
+                              "number",
+                              "null"
+                            ]
                           },
                           "cuisines": {
                             "type": "array",
@@ -2349,25 +2352,31 @@
                     },
                     "total": {
                       "type": "integer",
-                      "minimum": -9007199254740991,
+                      "minimum": 0,
                       "maximum": 9007199254740991
                     },
                     "page": {
                       "type": "integer",
-                      "minimum": -9007199254740991,
+                      "exclusiveMinimum": 0,
                       "maximum": 9007199254740991
                     },
                     "limit": {
                       "type": "integer",
-                      "minimum": -9007199254740991,
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "totalPages": {
+                      "type": "integer",
+                      "minimum": 0,
                       "maximum": 9007199254740991
                     }
                   },
                   "required": [
-                    "restaurants",
+                    "items",
                     "total",
                     "page",
-                    "limit"
+                    "limit",
+                    "totalPages"
                   ],
                   "additionalProperties": false
                 }
@@ -2514,7 +2523,10 @@
                       ]
                     },
                     "distanceKm": {
-                      "type": "number"
+                      "type": [
+                        "number",
+                        "null"
+                      ]
                     },
                     "cuisines": {
                       "type": "array",
@@ -2641,7 +2653,10 @@
                       ]
                     },
                     "distanceKm": {
-                      "type": "number"
+                      "type": [
+                        "number",
+                        "null"
+                      ]
                     },
                     "cuisines": {
                       "type": "array",
@@ -2806,7 +2821,10 @@
                       ]
                     },
                     "distanceKm": {
-                      "type": "number"
+                      "type": [
+                        "number",
+                        "null"
+                      ]
                     },
                     "cuisines": {
                       "type": "array",
@@ -2949,7 +2967,10 @@
                       ]
                     },
                     "distanceKm": {
-                      "type": "number"
+                      "type": [
+                        "number",
+                        "null"
+                      ]
                     },
                     "cuisines": {
                       "type": "array",
@@ -3095,7 +3116,9 @@
         "parameters": [
           {
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
             },
             "in": "path",
             "name": "restaurantId",
@@ -3104,7 +3127,110 @@
         ],
         "responses": {
           "200": {
-            "description": "Default Response"
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "sortOrder": {
+                        "type": "number"
+                      },
+                      "items": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "categoryId": {
+                              "type": "string",
+                              "format": "uuid",
+                              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "description": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "priceMinor": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "priceFormatted": {
+                              "type": "string"
+                            },
+                            "maxQuantity": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "availability": {
+                              "type": "string",
+                              "enum": [
+                                "AVAILABLE",
+                                "UNAVAILABLE"
+                              ]
+                            },
+                            "imageUrl": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "createdAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "categoryId",
+                            "name",
+                            "priceMinor",
+                            "priceFormatted",
+                            "maxQuantity",
+                            "availability",
+                            "createdAt"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "sortOrder",
+                      "items"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            }
           }
         }
       }

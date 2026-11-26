@@ -32,10 +32,12 @@ vi.mock("expo-location", () => ({
   getCurrentPositionAsync: mockGetCurrentPosition,
 }));
 
+import { AxiosError, AxiosHeaders } from "axios";
 import { resolveApiBaseUrl } from "./env";
 import { normalizeNigerianPhone } from "./validation";
 import { locationService, LocationAccessError } from "../services/locationService";
-import { api } from "../services/api";
+import { api, normalizeApiError } from "../services/api";
+import { authService } from "../services/authService";
 import { riderDeliveryService } from "../services/riderDeliveryService";
 import { useRiderStore } from "../store/useRiderStore";
 
@@ -102,5 +104,94 @@ describe("Rider Environment, Location GPS, KYC & Session Recovery", () => {
     expect(state.riderStatus).toBe("ACTIVE");
     expect(state.kycStatus).toBe("APPROVED");
     expect(state.lastKnownCoordinates).toEqual({ latitude: 6.7429, longitude: 6.1356 });
+  });
+
+  it("submits KYC with extended 30s timeout and classifies timeouts, conflicts, and KYC status updates", async () => {
+    const postSpy = vi.spyOn(api, "post").mockResolvedValueOnce({
+      data: {
+        id: "app-1",
+        riderProfileId: "rider-prof-1",
+        status: "UNDER_REVIEW",
+        riderStatus: "PENDING",
+        firstName: "Daniel",
+        lastName: "Okafor",
+        phone: "+2348054093095",
+        operatingCity: "Ekpoma",
+        vehicleType: "MOTORCYCLE",
+        governmentIdType: "NIN",
+        governmentIdMasked: "*******8901",
+        bankName: "Access Bank",
+        accountHolderName: "Daniel Okafor",
+        bankAccountMasked: "******6789",
+        submittedAt: "2026-11-26T10:05:00.000Z",
+        documents: [],
+      },
+    } as never);
+
+    const submitted = await riderDeliveryService.submitKyc({
+      firstName: "Daniel",
+      lastName: "Okafor",
+      phone: "+2348054093095",
+      operatingCity: "Ekpoma",
+      vehicleType: "MOTORCYCLE",
+      governmentIdType: "NIN",
+      governmentIdNumber: "12345678901",
+      bankName: "Access Bank",
+      accountHolderName: "Daniel Okafor",
+      bankAccountNumber: "0123456789",
+      documents: [{ documentType: "GOVERNMENT_ID", publicId: "chovia/documents/u/id" }],
+    });
+
+    expect(submitted.status).toBe("UNDER_REVIEW");
+    expect(postSpy).toHaveBeenCalledWith(
+      "/riders/kyc",
+      expect.any(Object),
+      expect.objectContaining({ timeout: 30000 })
+    );
+
+    const kycTimeout = new AxiosError("timeout of 30000ms exceeded", "ECONNABORTED");
+    expect(normalizeApiError(kycTimeout)).toMatchObject({
+      code: "TIMEOUT_ERROR",
+      statusCode: 0,
+    });
+
+    const lockConflict = new AxiosError("Conflict", "ERR_BAD_REQUEST", undefined, undefined, {
+      status: 409,
+      statusText: "Conflict",
+      headers: new AxiosHeaders(),
+      config: { headers: new AxiosHeaders() },
+      data: { code: "CONFLICT", message: "A KYC submission is already in progress" },
+    });
+    expect(normalizeApiError(lockConflict)).toMatchObject({
+      statusCode: 409,
+      code: "CONFLICT",
+    });
+
+    postSpy.mockResolvedValueOnce({
+      data: { message: "OTP sent", signedToken: "", expiresInMinutes: 15 },
+    } as never);
+    const alreadyVerifiedRecovery = await authService.requestEmailVerification("rider@chovia.app");
+    expect(alreadyVerifiedRecovery.signedToken).toBe("");
+
+    vi.spyOn(api, "get").mockResolvedValueOnce({
+      data: {
+        id: "rider-prof-1",
+        userId: "user-1",
+        firstName: "Daniel",
+        lastName: "Okafor",
+        status: "PENDING",
+        isOnline: false,
+        isAvailable: false,
+        kycStatus: "REJECTED",
+        kycRejectionReason: "Blurry government ID",
+        activeDeliveryCount: 0,
+      },
+    } as never);
+    const rejectedProfile = await riderDeliveryService.getMyProfile();
+    expect(rejectedProfile.kycRejectionReason).toBe("Blurry government ID");
+    useRiderStore.getState().syncFromServerProfile(rejectedProfile);
+    expect(useRiderStore.getState().kycStatus).toBe("REJECTED");
+    expect(useRiderStore.getState().riderStatus).toBe("PENDING");
+    expect(useRiderStore.getState().isShiftOnline).toBe(false);
   });
 });

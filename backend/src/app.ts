@@ -3,7 +3,11 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import fastifyRawBody from "fastify-raw-body";
-import { validatorCompiler, serializerCompiler } from "@fastify/type-provider-zod";
+import {
+  validatorCompiler,
+  serializerCompiler,
+  isResponseSerializationError,
+} from "@fastify/type-provider-zod";
 import { z, ZodError } from "zod";
 
 import "./types/auth.js";
@@ -100,6 +104,51 @@ export async function buildApp() {
         code: error.code,
         message: error.message,
         details: error.details,
+        timestamp,
+      });
+    }
+
+    if (isResponseSerializationError(error)) {
+      const issues = error.cause.issues.map((issue) => {
+        const entry: {
+          path: string;
+          code: string;
+          message: string;
+          expected?: string;
+          received?: string;
+        } = {
+          path: issue.path.length > 0 ? issue.path.join(".") : "<root>",
+          code: String(issue.code),
+          message: issue.message,
+        };
+        if ("expected" in issue && issue.expected !== undefined) {
+          entry.expected = String(issue.expected);
+        }
+        if ("received" in issue && issue.received !== undefined) {
+          entry.received = String(issue.received);
+        }
+        return entry;
+      });
+
+      const endpoint = `${error.method} ${error.url}`;
+      request.log.error(
+        {
+          endpoint,
+          issues,
+        },
+        "Response schema serialization mismatch"
+      );
+
+      sentryService.captureException(error, {
+        endpoint,
+        issues,
+      });
+
+      return reply.status(500).send({
+        statusCode: 500,
+        code: "RESPONSE_VALIDATION_ERROR",
+        message: "Server response contract mismatch",
+        ...(env.NODE_ENV !== "production" ? { details: { endpoint, issues } } : {}),
         timestamp,
       });
     }

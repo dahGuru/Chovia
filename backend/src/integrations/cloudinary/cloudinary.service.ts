@@ -672,14 +672,21 @@ export class CloudinaryService {
     }
   }
 
-  async deleteImage(publicId: string): Promise<{ result: string }> {
+  async deleteImage(
+    publicId: string,
+    options?: {
+      resourceType?: "image" | "raw";
+      deliveryType?: "upload" | "authenticated";
+    }
+  ): Promise<{ result: string }> {
     if (this.isMock) {
       return { result: "ok" };
     }
 
     try {
       const response = (await cloudinary.uploader.destroy(publicId, {
-        resource_type: "image",
+        resource_type: options?.resourceType ?? "image",
+        type: options?.deliveryType ?? "upload",
       })) as { result: string };
       return response;
     } catch (error) {

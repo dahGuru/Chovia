@@ -104,11 +104,13 @@ describe("OpenAPI 3.1 Contract & Automated Verification", () => {
       "/api/v1/auth/login",
       "/api/v1/auth/refresh",
       "/api/v1/auth/logout",
+      "/api/v1/auth/verify-email/request",
       "/api/v1/auth/verify-email/verify",
       "/api/v1/users/profile",
       "/api/v1/users/upload-signature",
       "/api/v1/users/upload-image",
       "/api/v1/restaurants/",
+      "/api/v1/restaurants/{restaurantId}/menu",
       "/api/v1/cart/",
       "/api/v1/cart/items",
       "/api/v1/orders/",
@@ -132,6 +134,19 @@ describe("OpenAPI 3.1 Contract & Automated Verification", () => {
     for (const endpoint of requiredEndpoints) {
       expect(paths[endpoint], `Missing endpoint in OpenAPI contract: ${endpoint}`).toBeDefined();
     }
+
+    const listRestaurants200 = paths["/api/v1/restaurants/"]?.get?.responses?.["200"] as
+      | { content?: { "application/json"?: { schema?: { properties?: Record<string, unknown> } } } }
+      | undefined;
+    const listProps = listRestaurants200?.content?.["application/json"]?.schema?.properties;
+    expect(listProps?.items).toBeDefined();
+    expect(listProps?.totalPages).toBeDefined();
+    expect(listProps?.restaurants).toBeUndefined();
+
+    const menu200 = paths["/api/v1/restaurants/{restaurantId}/menu"]?.get?.responses?.["200"] as
+      | { content?: { "application/json"?: { schema?: { type?: string } } } }
+      | undefined;
+    expect(menu200?.content?.["application/json"]?.schema?.type).toBe("array");
   });
 
   it("should attach request body schemas for state-mutating endpoints", () => {

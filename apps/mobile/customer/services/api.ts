@@ -24,19 +24,57 @@ export class ApiClientError extends Error {
   }
 }
 
+function defaultCodeForStatus(status: number, isTimeout: boolean): string {
+  if (isTimeout) return "TIMEOUT_ERROR";
+  if (status === 0) return "NETWORK_ERROR";
+  if (status === 400 || status === 422) return "VALIDATION_ERROR";
+  if (status === 401) return "UNAUTHORIZED";
+  if (status === 403) return "FORBIDDEN";
+  if (status === 404) return "NOT_FOUND";
+  if (status === 409) return "CONFLICT";
+  if (status === 429) return "RATE_LIMIT_EXCEEDED";
+  if (status === 502 || status === 503 || status === 504) return "SERVICE_UNAVAILABLE";
+  if (status >= 500) return "INTERNAL_SERVER_ERROR";
+  return "API_ERROR";
+}
+
+function defaultMessageForStatus(status: number, isTimeout: boolean, fallback: string): string {
+  if (isTimeout) {
+    return "The request took too long to complete. Please try again.";
+  }
+  if (status === 0) {
+    return "Unable to reach the server. Please check your connection.";
+  }
+  if (status === 429) {
+    return "Too many requests. Please wait a moment and try again.";
+  }
+  if (status === 502 || status === 503 || status === 504) {
+    return "The server is temporarily unavailable. Please try again shortly.";
+  }
+  return fallback || "An unexpected error occurred";
+}
+
 export function normalizeApiError(error: unknown): ApiClientError {
   if (error instanceof ApiClientError) {
     return error;
   }
   if (axios.isAxiosError(error)) {
     const status = error.response?.status ?? 0;
-    const data = error.response?.data as BackendErrorPayload | undefined;
-    const code = data?.code ?? (status === 0 ? "NETWORK_ERROR" : "API_ERROR");
+    const isTimeout =
+      error.code === "ECONNABORTED" ||
+      error.code === "ETIMEDOUT" ||
+      (status === 0 && /timeout/i.test(error.message ?? ""));
+    const rawData = error.response?.data;
+    const data =
+      rawData && typeof rawData === "object"
+        ? (rawData as BackendErrorPayload)
+        : undefined;
+    const code = data?.code ?? defaultCodeForStatus(status, isTimeout);
     const message =
-      data?.message ??
-      (status === 0
-        ? "Unable to reach the server. Please check your connection."
-        : error.message || "An unexpected error occurred");
+      (typeof data?.message === "string" && data.message.trim().length > 0
+        ? data.message
+        : undefined) ??
+      defaultMessageForStatus(status, isTimeout, error.message);
     return new ApiClientError(status, code, message, data?.details);
   }
   if (error instanceof Error) {
@@ -98,7 +136,14 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-const AUTH_BYPASS_PATHS = ["/auth/login", "/auth/register", "/auth/refresh"];
+const AUTH_BYPASS_PATHS = [
+  "/auth/login",
+  "/auth/register",
+  "/auth/rider/register",
+  "/auth/refresh",
+  "/auth/verify-email",
+  "/auth/password-reset",
+];
 
 api.interceptors.response.use(
   (response) => response,

@@ -168,15 +168,24 @@ export default function CustomerLoginScreen() {
               )}
             />
 
-            <TouchableOpacity
-              onPress={() => router.push("/(auth)/forgot-password")}
-              activeOpacity={0.7}
-              className="self-end"
-            >
-              <Text className="font-manrope-medium text-[14px] text-chovia-green">
-                Forgot password?
-              </Text>
-            </TouchableOpacity>
+            <View className="flex-row items-center justify-between">
+              <TouchableOpacity
+                onPress={() => router.push("/(auth)/verify-email")}
+                activeOpacity={0.7}
+              >
+                <Text className="font-manrope-medium text-[14px] text-chovia-green">
+                  Verify email
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => router.push("/(auth)/forgot-password")}
+                activeOpacity={0.7}
+              >
+                <Text className="font-manrope-medium text-[14px] text-chovia-green">
+                  Forgot password?
+                </Text>
+              </TouchableOpacity>
+            </View>
 
             <View className="mt-2">
               <Button label="Log in" onPress={handleSubmit(onSubmit)} loading={isSubmitting} />

@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { prisma } from "../../database/prisma.js";
-import { atomicConsumeToken } from "../../cache/redis.js";
+import { atomicConsumeToken, cacheDel, cacheGet, cacheSet } from "../../cache/redis.js";
 import {
   BadRequestError,
   ConflictError,
@@ -59,6 +59,40 @@ function serializeUser(user: {
 }
 
 export class AuthService {
+  private getActiveOtpKey(action: "VERIFY_EMAIL" | "PASSWORD_RESET", email: string): string {
+    return `active_otp:${action}:${email.toLowerCase()}`;
+  }
+
+  private hashTokenForChallenge(signedToken: string): string {
+    return crypto.createHash("sha256").update(signedToken).digest("hex");
+  }
+
+  private async recordActiveOtpChallenge(
+    action: "VERIFY_EMAIL" | "PASSWORD_RESET",
+    email: string,
+    signedToken: string
+  ): Promise<void> {
+    if (!signedToken) return;
+    await cacheSet(
+      this.getActiveOtpKey(action, email),
+      this.hashTokenForChallenge(signedToken),
+      env.OTP_EXPIRES_IN_MINUTES * 60
+    );
+  }
+
+  private async ensureOtpNotSuperseded(
+    action: "VERIFY_EMAIL" | "PASSWORD_RESET",
+    email: string,
+    signedToken: string
+  ): Promise<void> {
+    const activeHash = await cacheGet(this.getActiveOtpKey(action, email));
+    if (activeHash && activeHash !== this.hashTokenForChallenge(signedToken)) {
+      throw new BadRequestError(
+        "This verification code has been superseded by a newer code. Please use the latest code sent to your email."
+      );
+    }
+  }
+
   async register(
     dto: RegisterRequestDto
   ): Promise<{ user: UserResponseDto; otpData: OtpSentResponseDto }> {
@@ -98,6 +132,7 @@ export class AuthService {
 
     const otp = generateNumericOtp();
     const { signedToken } = createOtpSignature(dto.email, otp, "VERIFY_EMAIL");
+    await this.recordActiveOtpChallenge("VERIFY_EMAIL", dto.email, signedToken);
     await emailService.sendVerificationEmail(dto.email, otp);
 
     return {
@@ -153,6 +188,7 @@ export class AuthService {
 
     const otp = generateNumericOtp();
     const { signedToken } = createOtpSignature(dto.email, otp, "VERIFY_EMAIL");
+    await this.recordActiveOtpChallenge("VERIFY_EMAIL", dto.email, signedToken);
     let emailDeliveryStatus: "SENT" | "FAILED_RETRYABLE" = "SENT";
 
     try {
@@ -386,6 +422,7 @@ export class AuthService {
 
     const otp = generateNumericOtp();
     const { signedToken } = createOtpSignature(email, otp, "VERIFY_EMAIL");
+    await this.recordActiveOtpChallenge("VERIFY_EMAIL", email, signedToken);
     await emailService.sendVerificationEmail(email, otp);
 
     return {
@@ -403,10 +440,25 @@ export class AuthService {
       );
     }
 
+    await this.ensureOtpNotSuperseded("VERIFY_EMAIL", email, signedToken);
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true, emailVerified: true },
+    });
+    if (!user) {
+      throw new BadRequestError("Invalid verification code");
+    }
+
     const replayKey = `consumed_otp:${signedToken}`;
     const consumed = await atomicConsumeToken(replayKey, env.OTP_EXPIRES_IN_MINUTES * 60);
     if (!consumed) {
       throw new BadRequestError("This verification code has already been consumed");
+    }
+
+    if (user.emailVerified) {
+      await cacheDel(this.getActiveOtpKey("VERIFY_EMAIL", email)).catch(() => undefined);
+      return { message: "Email address is already verified", success: true };
     }
 
     await prisma.user.update({
@@ -416,6 +468,7 @@ export class AuthService {
         emailVerifiedAt: new Date(),
       },
     });
+    await cacheDel(this.getActiveOtpKey("VERIFY_EMAIL", email)).catch(() => undefined);
 
     return { message: "Email verified successfully", success: true };
   }
@@ -426,6 +479,7 @@ export class AuthService {
     const { signedToken } = createOtpSignature(email, otp, "PASSWORD_RESET");
 
     if (user) {
+      await this.recordActiveOtpChallenge("PASSWORD_RESET", email, signedToken);
       await emailService.sendPasswordResetEmail(email, otp);
     }
 
@@ -448,11 +502,14 @@ export class AuthService {
       );
     }
 
+    await this.ensureOtpNotSuperseded("PASSWORD_RESET", email, signedToken);
+
     const replayKey = `consumed_otp:${signedToken}`;
     const consumed = await atomicConsumeToken(replayKey, env.OTP_EXPIRES_IN_MINUTES * 60);
     if (!consumed) {
       throw new BadRequestError("This reset code has already been consumed");
     }
+    await cacheDel(this.getActiveOtpKey("PASSWORD_RESET", email)).catch(() => undefined);
 
     // Single-use reset authorization token valid for 15 minutes
     const resetExpiresAt = Date.now() + 15 * 60 * 1000;

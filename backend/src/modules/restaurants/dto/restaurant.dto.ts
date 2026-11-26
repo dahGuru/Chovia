@@ -94,10 +94,22 @@ export const restaurantResponseSchema = z
     maxDeliveryDistanceKm: z.number(),
     status: z.enum(["PENDING_APPROVAL", "ACTIVE", "REJECTED", "SUSPENDED"]),
     availability: z.enum(["OPEN", "CLOSED", "SUSPENDED"]),
-    distanceKm: z.number().optional(),
+    distanceKm: z.number().nullable().optional(),
     cuisines: z.array(z.string()).optional(),
     createdAt: z.string(),
   })
   .strict();
 
 export type RestaurantResponseDto = z.infer<typeof restaurantResponseSchema>;
+
+export const paginatedRestaurantsResponseSchema = z
+  .object({
+    items: z.array(restaurantResponseSchema),
+    total: z.number().int().nonnegative(),
+    page: z.number().int().positive(),
+    limit: z.number().int().positive(),
+    totalPages: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export type PaginatedRestaurantsResponseDto = z.infer<typeof paginatedRestaurantsResponseSchema>;

@@ -113,9 +113,13 @@ export default function RiderOtpScreen() {
           : await authService.requestPasswordReset(email);
       if (response.signedToken) {
         setSignedToken(response.signedToken);
+        setNotice("A new 6-digit verification code has been sent to your email.");
+        setCooldown(45);
+      } else if (response.message.toLowerCase().includes("already verified")) {
+        setNotice("Your rider email is already verified. You can log in now.");
+      } else {
+        setNotice(response.message);
       }
-      setNotice("A new 6-digit verification code has been sent to your email.");
-      setCooldown(45);
     } catch (err) {
       setServerError(
         err instanceof ApiClientError ? err.message : "Could not resend verification code."
@@ -197,6 +201,24 @@ export default function RiderOtpScreen() {
               </TouchableOpacity>
             )}
           </View>
+
+          {mode === "verify-email" && (
+            <TouchableOpacity
+              onPress={() =>
+                router.replace(
+                  email
+                    ? { pathname: "/(auth)/verify-email", params: { email } }
+                    : "/(auth)/verify-email"
+                )
+              }
+              activeOpacity={0.7}
+              className="self-center pt-1"
+            >
+              <Text className="font-manrope-medium text-[13px] text-chovia-green">
+                Lost your code or want to use another email?
+              </Text>
+            </TouchableOpacity>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

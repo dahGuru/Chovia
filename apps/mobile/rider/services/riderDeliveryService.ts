@@ -181,7 +181,9 @@ export const riderDeliveryService = {
   },
 
   async submitKyc(payload: SubmitRiderKycRequestDto): Promise<RiderKycApplicationResponseDto> {
-    const { data } = await api.post<RiderKycApplicationResponseDto>("/riders/kyc", payload);
+    const { data } = await api.post<RiderKycApplicationResponseDto>("/riders/kyc", payload, {
+      timeout: 30000,
+    });
     return data;
   },
 
@@ -191,13 +193,17 @@ export const riderDeliveryService = {
     fileSizeBytes?: number | undefined;
     customPublicId?: string | undefined;
   }): Promise<UploadDocumentResultDto> {
-    const { data } = await api.post<UploadDocumentResultDto>("/users/upload-image", {
-      file: payload.fileDataUri,
-      folder: "documents",
-      mimeType: payload.mimeType,
-      ...(payload.fileSizeBytes ? { fileSizeBytes: payload.fileSizeBytes } : {}),
-      ...(payload.customPublicId ? { customPublicId: payload.customPublicId } : {}),
-    });
+    const { data } = await api.post<UploadDocumentResultDto>(
+      "/users/upload-image",
+      {
+        file: payload.fileDataUri,
+        folder: "documents",
+        mimeType: payload.mimeType,
+        ...(payload.fileSizeBytes ? { fileSizeBytes: payload.fileSizeBytes } : {}),
+        ...(payload.customPublicId ? { customPublicId: payload.customPublicId } : {}),
+      },
+      { timeout: 30000 }
+    );
     return data;
   },
 

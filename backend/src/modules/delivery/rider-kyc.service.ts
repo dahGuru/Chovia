@@ -1,9 +1,11 @@
 import { prisma } from "../../database/prisma.js";
 import {
   BadRequestError,
+  ConflictError,
   ForbiddenError,
   NotFoundError,
 } from "../../common/errors/api-error.js";
+import { isRedisClientReady, redis } from "../../cache/redis.js";
 import { cloudinaryService } from "../../integrations/cloudinary/cloudinary.service.js";
 import { encryptSensitiveValue, maskSensitiveDigits } from "../../utils/encryption.js";
 import type {
@@ -12,6 +14,46 @@ import type {
   RiderKycApplicationResponseDto,
   SubmitRiderKycRequestDto,
 } from "./dto/kyc.dto.js";
+
+const KYC_LOCK_TTL_SECONDS = 30;
+const KYC_TX_OPTIONS = {
+  maxWait: 5000,
+  timeout: 15000,
+} as const;
+const inFlightKycSubmissions = new Set<string>();
+
+async function acquireKycSubmissionLock(userId: string): Promise<() => Promise<void>> {
+  const lockKey = `kyc_submit_lock:${userId}`;
+
+  if (isRedisClientReady()) {
+    try {
+      const acquired = await redis.set(lockKey, "1", "EX", KYC_LOCK_TTL_SECONDS, "NX");
+      if (acquired !== "OK") {
+        throw new ConflictError(
+          "A KYC submission is already in progress for your account. Please wait."
+        );
+      }
+      return async () => {
+        await redis.del(lockKey).catch(() => undefined);
+      };
+    } catch (err) {
+      if (err instanceof ConflictError) {
+        throw err;
+      }
+      // Fall through to process-local lock if Redis errors unexpectedly in dev
+    }
+  }
+
+  if (inFlightKycSubmissions.has(userId)) {
+    throw new ConflictError(
+      "A KYC submission is already in progress for your account. Please wait."
+    );
+  }
+  inFlightKycSubmissions.add(userId);
+  return async () => {
+    inFlightKycSubmissions.delete(userId);
+  };
+}
 
 interface ApplicationRecordWithRelations {
   id: string;
@@ -102,130 +144,160 @@ export class RiderKycService {
     userId: string,
     dto: SubmitRiderKycRequestDto
   ): Promise<RiderKycApplicationResponseDto> {
-    const rider = await prisma.riderProfile.findUnique({
-      where: { userId },
-      include: {
-        kycApplication: true,
-        user: { select: { email: true } },
-      },
-    });
-
-    if (!rider) {
-      throw new ForbiddenError("Rider profile not found for this user");
-    }
-
-    if (rider.status === "SUSPENDED" || rider.status === "DEACTIVATED") {
-      throw new ForbiddenError(
-        `Cannot submit KYC while rider profile is ${rider.status.toLowerCase()}`
-      );
-    }
-
-    if (rider.kycApplication?.status === "APPROVED" || rider.status === "ACTIVE") {
-      throw new BadRequestError("Your KYC application has already been approved");
-    }
-
-    // Verify every submitted document with Cloudinary & confirm authenticated private delivery + user ownership
-    const verifiedDocs = await Promise.all(
-      dto.documents.map(async (doc) => {
-        const verified = await cloudinaryService.verifyAssetWithProvider(
-          doc.publicId,
-          "documents",
-          userId
-        );
-        return {
-          documentType: doc.documentType,
-          publicId: verified.publicId,
-          resourceType: verified.resourceType || "image",
-          deliveryType: verified.deliveryType || "authenticated",
-          format: verified.format ?? null,
-          bytes: verified.bytes ?? null,
-          verifiedAt: new Date(),
-        };
-      })
-    );
-
-    const encryptedGovernmentId = encryptSensitiveValue(dto.governmentIdNumber);
-    const governmentIdMasked = maskSensitiveDigits(dto.governmentIdNumber);
-    const encryptedBankAccountNumber = encryptSensitiveValue(dto.bankAccountNumber);
-    const bankAccountMasked = maskSensitiveDigits(dto.bankAccountNumber);
-
-    const saved = await prisma.$transaction(async (tx) => {
-      await tx.riderProfile.update({
-        where: { id: rider.id },
-        data: {
-          firstName: dto.firstName,
-          lastName: dto.lastName,
-          operatingCity: dto.operatingCity,
-          vehicleType: dto.vehicleType,
-          vehiclePlateNumber: dto.vehiclePlateNumber ?? null,
-          status: "PENDING",
-          isOnline: false,
-          isAvailable: false,
-        },
-      });
-
-      const app = await tx.riderKycApplication.upsert({
-        where: { riderProfileId: rider.id },
-        create: {
-          riderProfileId: rider.id,
-          status: "UNDER_REVIEW",
-          firstName: dto.firstName,
-          lastName: dto.lastName,
-          phone: dto.phone,
-          operatingCity: dto.operatingCity,
-          homeAddress: dto.homeAddress ?? null,
-          vehicleType: dto.vehicleType,
-          vehiclePlateNumber: dto.vehiclePlateNumber ?? null,
-          governmentIdType: dto.governmentIdType,
-          encryptedGovernmentId,
-          governmentIdMasked,
-          bankName: dto.bankName,
-          bankCode: dto.bankCode ?? null,
-          accountHolderName: dto.accountHolderName,
-          encryptedBankAccountNumber,
-          bankAccountMasked,
-          submittedAt: new Date(),
-        },
-        update: {
-          status: "UNDER_REVIEW",
-          firstName: dto.firstName,
-          lastName: dto.lastName,
-          phone: dto.phone,
-          operatingCity: dto.operatingCity,
-          homeAddress: dto.homeAddress ?? null,
-          vehicleType: dto.vehicleType,
-          vehiclePlateNumber: dto.vehiclePlateNumber ?? null,
-          governmentIdType: dto.governmentIdType,
-          encryptedGovernmentId,
-          governmentIdMasked,
-          bankName: dto.bankName,
-          bankCode: dto.bankCode ?? null,
-          accountHolderName: dto.accountHolderName,
-          encryptedBankAccountNumber,
-          bankAccountMasked,
-          submittedAt: new Date(),
-          reviewedAt: null,
-          reviewedByUserId: null,
-          rejectionReason: null,
-          reviewNotes: null,
-        },
-      });
-
-      await tx.riderDocument.deleteMany({
-        where: { applicationId: app.id },
-      });
-
-      for (const doc of verifiedDocs) {
-        await tx.riderDocument.create({
-          data: {
-            applicationId: app.id,
-            ...doc,
+    const releaseLock = await acquireKycSubmissionLock(userId);
+    try {
+      const rider = await prisma.riderProfile.findUnique({
+        where: { userId },
+        include: {
+          kycApplication: {
+            include: { documents: { select: { publicId: true } } },
           },
-        });
+          user: { select: { email: true } },
+        },
+      });
+
+      if (!rider) {
+        throw new ForbiddenError("Rider profile not found for this user");
       }
 
-      return tx.riderKycApplication.findUniqueOrThrow({
-        where: { id: app.id },
+      if (rider.status === "SUSPENDED" || rider.status === "DEACTIVATED") {
+        throw new ForbiddenError(
+          `Cannot submit KYC while rider profile is ${rider.status.toLowerCase()}`
+        );
+      }
+
+      if (rider.kycApplication?.status === "APPROVED" || rider.status === "ACTIVE") {
+        throw new BadRequestError("Your KYC application has already been approved");
+      }
+
+      const existingPublicIds = new Set(
+        (rider.kycApplication?.documents ?? []).map((d) => d.publicId)
+      );
+
+      // Verify every submitted document with Cloudinary & confirm authenticated private delivery + user ownership BEFORE DB transaction
+      const verifiedDocs = await Promise.all(
+        dto.documents.map(async (doc) => {
+          const verified = await cloudinaryService.verifyAssetWithProvider(
+            doc.publicId,
+            "documents",
+            userId
+          );
+          return {
+            documentType: doc.documentType,
+            publicId: verified.publicId,
+            resourceType: verified.resourceType || "image",
+            deliveryType: verified.deliveryType || "authenticated",
+            format: verified.format ?? null,
+            bytes: verified.bytes ?? null,
+            verifiedAt: new Date(),
+          };
+        })
+      );
+
+      const newlyUploadedDocs = verifiedDocs.filter((d) => !existingPublicIds.has(d.publicId));
+
+      const encryptedGovernmentId = encryptSensitiveValue(dto.governmentIdNumber);
+      const governmentIdMasked = maskSensitiveDigits(dto.governmentIdNumber);
+      const encryptedBankAccountNumber = encryptSensitiveValue(dto.bankAccountNumber);
+      const bankAccountMasked = maskSensitiveDigits(dto.bankAccountNumber);
+
+      let applicationId: string;
+      try {
+        applicationId = await prisma.$transaction(async (tx) => {
+          await tx.riderProfile.update({
+            where: { id: rider.id },
+            data: {
+              firstName: dto.firstName,
+              lastName: dto.lastName,
+              operatingCity: dto.operatingCity,
+              vehicleType: dto.vehicleType,
+              vehiclePlateNumber: dto.vehiclePlateNumber ?? null,
+              status: "PENDING",
+              isOnline: false,
+              isAvailable: false,
+            },
+          });
+
+          const app = await tx.riderKycApplication.upsert({
+            where: { riderProfileId: rider.id },
+            create: {
+              riderProfileId: rider.id,
+              status: "UNDER_REVIEW",
+              firstName: dto.firstName,
+              lastName: dto.lastName,
+              phone: dto.phone,
+              operatingCity: dto.operatingCity,
+              homeAddress: dto.homeAddress ?? null,
+              vehicleType: dto.vehicleType,
+              vehiclePlateNumber: dto.vehiclePlateNumber ?? null,
+              governmentIdType: dto.governmentIdType,
+              encryptedGovernmentId,
+              governmentIdMasked,
+              bankName: dto.bankName,
+              bankCode: dto.bankCode ?? null,
+              accountHolderName: dto.accountHolderName,
+              encryptedBankAccountNumber,
+              bankAccountMasked,
+              submittedAt: new Date(),
+            },
+            update: {
+              status: "UNDER_REVIEW",
+              firstName: dto.firstName,
+              lastName: dto.lastName,
+              phone: dto.phone,
+              operatingCity: dto.operatingCity,
+              homeAddress: dto.homeAddress ?? null,
+              vehicleType: dto.vehicleType,
+              vehiclePlateNumber: dto.vehiclePlateNumber ?? null,
+              governmentIdType: dto.governmentIdType,
+              encryptedGovernmentId,
+              governmentIdMasked,
+              bankName: dto.bankName,
+              bankCode: dto.bankCode ?? null,
+              accountHolderName: dto.accountHolderName,
+              encryptedBankAccountNumber,
+              bankAccountMasked,
+              submittedAt: new Date(),
+              reviewedAt: null,
+              reviewedByUserId: null,
+              rejectionReason: null,
+              reviewNotes: null,
+            },
+          });
+
+          await tx.riderDocument.deleteMany({
+            where: { applicationId: app.id },
+          });
+
+          if (verifiedDocs.length > 0) {
+            await tx.riderDocument.createMany({
+              data: verifiedDocs.map((doc) => ({
+                applicationId: app.id,
+                ...doc,
+              })),
+            });
+          }
+
+          return app.id;
+        }, KYC_TX_OPTIONS);
+      } catch (err) {
+        // Best-effort cleanup ONLY of newly uploaded assets from this failed attempt; never delete assets tied to prior valid records
+        if (newlyUploadedDocs.length > 0) {
+          await Promise.allSettled(
+            newlyUploadedDocs.map((doc) =>
+              cloudinaryService.deleteImage(doc.publicId, {
+                resourceType: doc.resourceType === "raw" ? "raw" : "image",
+                deliveryType: "authenticated",
+              })
+            )
+          );
+        }
+        throw err;
+      }
+
+      // Read full hydrated application AFTER transaction commit to avoid unnecessary TX hold time
+      const saved = await prisma.riderKycApplication.findUniqueOrThrow({
+        where: { id: applicationId },
         include: {
           riderProfile: {
             include: { user: { select: { email: true } } },
@@ -233,9 +305,11 @@ export class RiderKycService {
           documents: true,
         },
       });
-    });
 
-    return serializeKycApplication(saved);
+      return serializeKycApplication(saved);
+    } finally {
+      await releaseLock();
+    }
   }
 
   async getMyApplication(userId: string): Promise<RiderKycApplicationResponseDto | null> {
@@ -360,8 +434,8 @@ export class RiderKycService {
       );
     }
 
-    const updated = await prisma.$transaction(async (tx) => {
-      const updatedApp = await tx.riderKycApplication.update({
+    await prisma.$transaction(async (tx) => {
+      await tx.riderKycApplication.update({
         where: { id: applicationId },
         data: {
           status: "APPROVED",
@@ -369,12 +443,6 @@ export class RiderKycService {
           reviewedByUserId: adminUserId,
           rejectionReason: null,
           reviewNotes: notes ?? null,
-        },
-        include: {
-          riderProfile: {
-            include: { user: { select: { email: true } } },
-          },
-          documents: true,
         },
       });
 
@@ -411,16 +479,16 @@ export class RiderKycService {
             "Your CHOVIA Rider verification has been approved. You can now go online and accept deliveries.",
         },
       });
+    }, KYC_TX_OPTIONS);
 
-      return tx.riderKycApplication.findUniqueOrThrow({
-        where: { id: updatedApp.id },
-        include: {
-          riderProfile: {
-            include: { user: { select: { email: true } } },
-          },
-          documents: true,
+    const updated = await prisma.riderKycApplication.findUniqueOrThrow({
+      where: { id: applicationId },
+      include: {
+        riderProfile: {
+          include: { user: { select: { email: true } } },
         },
-      });
+        documents: true,
+      },
     });
 
     return serializeKycApplication(updated);
@@ -446,8 +514,8 @@ export class RiderKycService {
       throw new NotFoundError("Rider KYC application not found");
     }
 
-    const updated = await prisma.$transaction(async (tx) => {
-      const updatedApp = await tx.riderKycApplication.update({
+    await prisma.$transaction(async (tx) => {
+      await tx.riderKycApplication.update({
         where: { id: applicationId },
         data: {
           status: "REJECTED",
@@ -487,16 +555,16 @@ export class RiderKycService {
           message: `Your rider verification was not approved: ${reason}. Please review and resubmit your application.`,
         },
       });
+    }, KYC_TX_OPTIONS);
 
-      return tx.riderKycApplication.findUniqueOrThrow({
-        where: { id: updatedApp.id },
-        include: {
-          riderProfile: {
-            include: { user: { select: { email: true } } },
-          },
-          documents: true,
+    const updated = await prisma.riderKycApplication.findUniqueOrThrow({
+      where: { id: applicationId },
+      include: {
+        riderProfile: {
+          include: { user: { select: { email: true } } },
         },
-      });
+        documents: true,
+      },
     });
 
     return serializeKycApplication(updated);

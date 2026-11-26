@@ -17,6 +17,7 @@ import { LockIcon, MailIcon } from "../../components/Icons";
 import { InputField } from "../../components/InputField";
 import { RiderHeader } from "../../components/RiderHeader";
 import { ApiClientError } from "../../services/api";
+import { authService } from "../../services/authService";
 import { riderDeliveryService } from "../../services/riderDeliveryService";
 import { useAuthStore } from "../../store/useAuthStore";
 
@@ -31,6 +32,8 @@ export default function RiderLoginScreen() {
   const params = useLocalSearchParams<{ verifiedEmail?: string }>();
   const login = useAuthStore((s) => s.login);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [needsVerificationEmail, setNeedsVerificationEmail] = useState<string | null>(null);
+  const [resendingOtp, setResendingOtp] = useState(false);
 
   const {
     control,
@@ -43,9 +46,11 @@ export default function RiderLoginScreen() {
 
   const onSubmit = async (values: RiderLoginFormValues) => {
     setServerError(null);
+    setNeedsVerificationEmail(null);
+    const normalizedEmail = values.email.toLowerCase();
     try {
       await login({
-        email: values.email.toLowerCase(),
+        email: normalizedEmail,
         password: values.password,
         deviceInfo: {
           deviceType:
@@ -66,9 +71,43 @@ export default function RiderLoginScreen() {
         router.replace("/(tabs)");
       }
     } catch (err) {
+      if (err instanceof ApiClientError) {
+        setServerError(err.message);
+        if (err.message.toLowerCase().includes("verify")) {
+          setNeedsVerificationEmail(normalizedEmail);
+        }
+      } else {
+        setServerError("Unable to sign in. Please try again.");
+      }
+    }
+  };
+
+  const handleVerifyEmail = async () => {
+    if (!needsVerificationEmail || resendingOtp) return;
+    setResendingOtp(true);
+    try {
+      const otpData = await authService.requestEmailVerification(needsVerificationEmail);
+      if (otpData.signedToken) {
+        router.push({
+          pathname: "/(auth)/otp",
+          params: {
+            email: needsVerificationEmail,
+            signedToken: otpData.signedToken,
+            mode: "verify-email",
+          },
+        });
+        return;
+      }
+      router.push({
+        pathname: "/(auth)/verify-email",
+        params: { email: needsVerificationEmail },
+      });
+    } catch (err) {
       setServerError(
-        err instanceof ApiClientError ? err.message : "Unable to sign in. Please try again."
+        err instanceof ApiClientError ? err.message : "Could not send verification code."
       );
+    } finally {
+      setResendingOtp(false);
     }
   };
 
@@ -105,6 +144,17 @@ export default function RiderLoginScreen() {
               <Text className="font-manrope-medium text-[13px] text-chovia-error">
                 {serverError}
               </Text>
+              {needsVerificationEmail && (
+                <TouchableOpacity
+                  onPress={() => void handleVerifyEmail()}
+                  disabled={resendingOtp}
+                  className="mt-2"
+                >
+                  <Text className="font-manrope-semibold text-[13px] text-chovia-green underline">
+                    {resendingOtp ? "Sending code..." : "Verify email address now"}
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
 
@@ -144,15 +194,24 @@ export default function RiderLoginScreen() {
             )}
           />
 
-          <TouchableOpacity
-            onPress={() => router.push("/(auth)/forgot-password")}
-            activeOpacity={0.7}
-            className="self-end"
-          >
-            <Text className="font-manrope-semibold text-[14px] text-chovia-green">
-              Forgot password?
-            </Text>
-          </TouchableOpacity>
+          <View className="flex-row items-center justify-between">
+            <TouchableOpacity
+              onPress={() => router.push("/(auth)/verify-email")}
+              activeOpacity={0.7}
+            >
+              <Text className="font-manrope-semibold text-[14px] text-chovia-green">
+                Verify email
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => router.push("/(auth)/forgot-password")}
+              activeOpacity={0.7}
+            >
+              <Text className="font-manrope-semibold text-[14px] text-chovia-green">
+                Forgot password?
+              </Text>
+            </TouchableOpacity>
+          </View>
 
           <View className="mt-1">
             <Button label="Log in" onPress={handleSubmit(onSubmit)} loading={isSubmitting} />

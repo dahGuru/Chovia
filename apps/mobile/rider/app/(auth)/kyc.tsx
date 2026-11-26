@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Alert, Platform, ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as DocumentPicker from "expo-document-picker";
@@ -94,6 +94,7 @@ export default function RiderKycScreen() {
   const [formError, setFormError] = useState<string | null>(null);
   const [uploadingDocType, setUploadingDocType] = useState<RiderDocumentType | null>(null);
   const [uploadedDocs, setUploadedDocs] = useState<Partial<Record<RiderDocumentType, UploadedDocState>>>({});
+  const submittingRef = useRef(false);
 
   // Pre-fill authenticated rider profile / previous application details safely
   useEffect(() => {
@@ -278,6 +279,9 @@ export default function RiderKycScreen() {
   };
 
   const handleSubmitApplication = async () => {
+    if (submittingRef.current || submitKyc.isPending) {
+      return;
+    }
     setFormError(null);
     const normalizedPhone = normalizeNigerianPhone(kycDraft.phone);
     if (!normalizedPhone) {
@@ -293,6 +297,7 @@ export default function RiderKycScreen() {
         publicId: d.publicId,
       }));
 
+    submittingRef.current = true;
     try {
       await submitKyc.mutateAsync({
         firstName: kycDraft.firstName.trim(),
@@ -319,6 +324,8 @@ export default function RiderKycScreen() {
           ? err.message
           : "Could not submit your KYC application. Please review your details and try again."
       );
+    } finally {
+      submittingRef.current = false;
     }
   };
 

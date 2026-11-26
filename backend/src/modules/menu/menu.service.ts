@@ -29,18 +29,29 @@ function serializeMenuItem(item: MenuItemRecord): MenuItemResponseDto {
     id: item.id,
     categoryId: item.categoryId,
     name: item.name,
-    description: item.description,
+    description: item.description ?? null,
     priceMinor,
     priceFormatted: formatCurrency(priceMinor),
     maxQuantity: item.maxQuantity,
     availability: item.availability,
-    imageUrl: item.imageUrl,
-    createdAt: item.createdAt.toISOString(),
+    imageUrl: item.imageUrl ?? null,
+    createdAt:
+      item.createdAt instanceof Date
+        ? item.createdAt.toISOString()
+        : new Date(item.createdAt).toISOString(),
   };
 }
 
 export class MenuService {
   async getRestaurantMenu(restaurantId: string): Promise<CategoryWithItemsResponseDto[]> {
+    const restaurant = await prisma.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: { id: true },
+    });
+    if (!restaurant) {
+      throw new NotFoundError("Restaurant not found");
+    }
+
     const categories = await prisma.menuCategory.findMany({
       where: {
         restaurantId,
@@ -58,7 +69,7 @@ export class MenuService {
     return categories.map((cat) => ({
       id: cat.id,
       name: cat.name,
-      description: cat.description,
+      description: cat.description ?? null,
       sortOrder: cat.sortOrder,
       items: cat.items.map(serializeMenuItem),
     }));

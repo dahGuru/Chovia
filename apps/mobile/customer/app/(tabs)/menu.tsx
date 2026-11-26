@@ -20,7 +20,7 @@ export default function CustomerMenuBrowseScreen() {
   });
 
   const restaurants = useMemo(() => {
-    const list = data?.restaurants ?? [];
+    const list = data?.items ?? [];
     return onlyOpen ? list.filter((r) => r.availability === "OPEN") : list;
   }, [data, onlyOpen]);
 

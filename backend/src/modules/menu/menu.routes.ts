@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync } from "fastify";
+import { z } from "zod";
 import { menuService } from "./menu.service.js";
 import {
   createCategoryRequestSchema,
@@ -6,6 +7,7 @@ import {
   createMenuItemRequestSchema,
   updateMenuItemRequestSchema,
   updateItemAvailabilityRequestSchema,
+  categoryWithItemsResponseSchema,
 } from "./dto/menu.dto.js";
 import { requireRestaurantStaff } from "../../plugins/auth-guard.js";
 
@@ -17,6 +19,10 @@ export const menuRoutes: FastifyPluginAsync = async (fastify) => {
       schema: {
         description: "Get full active menu for a restaurant organized by category",
         tags: ["Menu"],
+        params: z.object({ restaurantId: z.string().uuid() }),
+        response: {
+          200: z.array(categoryWithItemsResponseSchema),
+        },
       },
     },
     async (request, reply) => {

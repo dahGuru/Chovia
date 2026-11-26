@@ -53,6 +53,8 @@ type RegisterFormValues = z.infer<typeof registerSchema>;
 
 export default function CustomerRegisterScreen() {
   const [serverError, setServerError] = useState<string | null>(null);
+  const [conflictEmail, setConflictEmail] = useState<string | null>(null);
+  const [recovering, setRecovering] = useState(false);
 
   const {
     control,
@@ -71,8 +73,9 @@ export default function CustomerRegisterScreen() {
 
   const onSubmit = async (values: RegisterFormValues) => {
     setServerError(null);
+    setConflictEmail(null);
+    const normalizedEmail = values.email.toLowerCase();
     try {
-      const normalizedEmail = values.email.toLowerCase();
       const response = await authService.register({
         firstName: values.firstName,
         lastName: values.lastName,
@@ -90,9 +93,43 @@ export default function CustomerRegisterScreen() {
         },
       });
     } catch (err) {
+      if (err instanceof ApiClientError) {
+        setServerError(err.message);
+        if (err.statusCode === 409 && err.message.toLowerCase().includes("email")) {
+          setConflictEmail(normalizedEmail);
+        }
+      } else {
+        setServerError("Registration failed. Please try again.");
+      }
+    }
+  };
+
+  const handleRecoverVerification = async () => {
+    if (!conflictEmail || recovering) return;
+    setRecovering(true);
+    try {
+      const otpData = await authService.requestEmailVerification(conflictEmail);
+      if (otpData.signedToken) {
+        router.push({
+          pathname: "/(auth)/otp",
+          params: {
+            email: conflictEmail,
+            signedToken: otpData.signedToken,
+            mode: "verify-email",
+          },
+        });
+        return;
+      }
+      router.push({
+        pathname: "/(auth)/verify-email",
+        params: { email: conflictEmail },
+      });
+    } catch (err) {
       setServerError(
-        err instanceof ApiClientError ? err.message : "Registration failed. Please try again."
+        err instanceof ApiClientError ? err.message : "Could not send verification code."
       );
+    } finally {
+      setRecovering(false);
     }
   };
 
@@ -123,6 +160,27 @@ export default function CustomerRegisterScreen() {
               <Text className="font-manrope-medium text-[13px] text-chovia-error">
                 {serverError}
               </Text>
+              {conflictEmail && (
+                <View className="mt-2.5 flex-row flex-wrap items-center gap-4">
+                  <TouchableOpacity
+                    onPress={() => void handleRecoverVerification()}
+                    disabled={recovering}
+                    activeOpacity={0.7}
+                  >
+                    <Text className="font-manrope-semibold text-[13px] text-chovia-green underline">
+                      {recovering ? "Sending code..." : "Verify email address"}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => router.replace("/(auth)/login")}
+                    activeOpacity={0.7}
+                  >
+                    <Text className="font-manrope-semibold text-[13px] text-chovia-deep underline">
+                      Go to Log in
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           )}
 
@@ -229,6 +287,16 @@ export default function CustomerRegisterScreen() {
               <Text className="font-manrope-semibold text-[14px] text-chovia-green">Log in</Text>
             </TouchableOpacity>
           </View>
+
+          <TouchableOpacity
+            onPress={() => router.push("/(auth)/verify-email")}
+            activeOpacity={0.7}
+            className="mt-3 self-center"
+          >
+            <Text className="font-manrope-medium text-[13px] text-chovia-green">
+              Need to verify an existing email?
+            </Text>
+          </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

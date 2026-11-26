@@ -8,6 +8,7 @@ import {
   updateRestaurantRequestSchema,
   updateAvailabilityRequestSchema,
   restaurantResponseSchema,
+  paginatedRestaurantsResponseSchema,
 } from "./dto/restaurant.dto.js";
 import { requireRestaurantStaff } from "../../plugins/auth-guard.js";
 
@@ -20,12 +21,7 @@ export const restaurantsRoutes: FastifyPluginAsync = async (fastify) => {
         tags: ["Restaurants"],
         querystring: listRestaurantsQuerySchema,
         response: {
-          200: z.object({
-            restaurants: z.array(restaurantResponseSchema),
-            total: z.number().int(),
-            page: z.number().int(),
-            limit: z.number().int(),
-          }),
+          200: paginatedRestaurantsResponseSchema,
         },
       },
     },
@@ -55,9 +51,11 @@ export const restaurantsRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const q = request.query as { lat?: string; lng?: string };
+      const parsedLat = q.lat !== undefined ? Number.parseFloat(q.lat) : Number.NaN;
+      const parsedLng = q.lng !== undefined ? Number.parseFloat(q.lng) : Number.NaN;
       const userLoc =
-        q.lat && q.lng
-          ? { lat: Number.parseFloat(q.lat), lng: Number.parseFloat(q.lng) }
+        Number.isFinite(parsedLat) && Number.isFinite(parsedLng)
+          ? { lat: parsedLat, lng: parsedLng }
           : undefined;
 
       const result = await restaurantsService.getById(id, userLoc);

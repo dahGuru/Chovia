@@ -8,6 +8,7 @@ import type {
   UpdateRestaurantRequestDto,
   UpdateAvailabilityRequestDto,
   RestaurantResponseDto,
+  PaginatedRestaurantsResponseDto,
 } from "./dto/restaurant.dto.js";
 
 interface RestaurantRecord {
@@ -73,7 +74,7 @@ function serializeRestaurant(
 export class RestaurantsService {
   async list(
     query: ListRestaurantsQueryDto
-  ): Promise<{ items: RestaurantResponseDto[]; total: number; page: number; limit: number; totalPages: number }> {
+  ): Promise<PaginatedRestaurantsResponseDto> {
     const where: RestaurantWhereInput = {
       status: "ACTIVE",
     };
@@ -82,12 +83,54 @@ export class RestaurantsService {
       where.OR = [
         { name: { contains: query.search, mode: "insensitive" } },
         { description: { contains: query.search, mode: "insensitive" } },
+        {
+          cuisines: {
+            some: {
+              cuisineCategory: {
+                name: { contains: query.search, mode: "insensitive" },
+              },
+            },
+          },
+        },
       ];
     }
 
     if (query.cuisineId) {
       where.cuisines = {
         some: { cuisineCategoryId: query.cuisineId },
+      };
+    }
+
+    const userLoc =
+      query.latitude !== undefined && query.longitude !== undefined
+        ? { lat: query.latitude, lng: query.longitude }
+        : undefined;
+
+    if (userLoc && query.radiusKm) {
+      const candidates = await prisma.restaurant.findMany({
+        where,
+        include: {
+          cuisines: {
+            include: { cuisineCategory: true },
+          },
+        },
+        orderBy: { name: "asc" },
+      });
+
+      const filtered = candidates
+        .map((r) => serializeRestaurant(r, userLoc))
+        .filter((r) => r.distanceKm !== undefined && r.distanceKm !== null && r.distanceKm <= query.radiusKm);
+
+      const total = filtered.length;
+      const start = (query.page - 1) * query.limit;
+      const items = filtered.slice(start, start + query.limit);
+
+      return {
+        items,
+        total,
+        page: query.page,
+        limit: query.limit,
+        totalPages: Math.ceil(total / query.limit) || 1,
       };
     }
 
@@ -106,16 +149,7 @@ export class RestaurantsService {
       }),
     ]);
 
-    const userLoc =
-      query.latitude !== undefined && query.longitude !== undefined
-        ? { lat: query.latitude, lng: query.longitude }
-        : undefined;
-
-    let items = rawRestaurants.map((r) => serializeRestaurant(r, userLoc));
-
-    if (userLoc && query.radiusKm) {
-      items = items.filter((r) => r.distanceKm !== undefined && r.distanceKm <= query.radiusKm);
-    }
+    const items = rawRestaurants.map((r) => serializeRestaurant(r, userLoc));
 
     return {
       items,
