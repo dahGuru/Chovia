@@ -191,6 +191,11 @@ enum DeliveryPricingConfigStatus {
   INACTIVE
 }
 
+enum GlobalCategoryKind {
+  FOOD
+  DRINK
+}
+
 
 // ============================================================
 // USER / IDENTITY
@@ -398,6 +403,9 @@ model Restaurant {
   name        String
   description String?
 
+  logoUrl       String?
+  coverImageUrl String?
+
   phone       String
   email       String?
 
@@ -419,6 +427,8 @@ model Restaurant {
 
   approvedAt DateTime?
   approvedBy String? @db.Uuid
+
+  rejectionReason String?
 
   suspendedAt DateTime?
   suspendedBy String? @db.Uuid
@@ -534,6 +544,7 @@ model OperatingHours {
 model CuisineCategory {
   id       String  @id @default(uuid()) @db.Uuid
   name     String  @unique
+  imageUrl String?
   isActive Boolean @default(true)
 
   createdAt DateTime @default(now())
@@ -542,6 +553,26 @@ model CuisineCategory {
   restaurants RestaurantCuisine[]
 
   @@map("cuisine_categories")
+}
+
+model GlobalCategory {
+  id          String             @id @default(uuid()) @db.Uuid
+  name        String
+  slug        String             @unique
+  kind        GlobalCategoryKind
+  description String?
+  imageUrl    String?
+  sortOrder   Int                @default(0)
+  isActive    Boolean            @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  menuItems MenuItem[]
+
+  @@unique([kind, name])
+  @@index([kind, isActive, sortOrder])
+  @@map("global_categories")
 }
 
 model RestaurantCuisine {
@@ -590,7 +621,8 @@ model MenuCategory {
 model MenuItem {
   id String @id @default(uuid()) @db.Uuid
 
-  categoryId String @db.Uuid
+  categoryId       String  @db.Uuid
+  globalCategoryId String? @db.Uuid
 
   name        String
   description String?
@@ -609,13 +641,15 @@ model MenuItem {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  category MenuCategory @relation(fields: [categoryId], references: [id])
+  category       MenuCategory    @relation(fields: [categoryId], references: [id])
+  globalCategory GlobalCategory? @relation(fields: [globalCategoryId], references: [id], onDelete: SetNull)
 
   cartItems CartItem[]
   orderItems OrderItem[]
   favorites Favorite[]
 
   @@index([categoryId, availability, isArchived])
+  @@index([globalCategoryId])
   @@index([name])
   @@map("menu_items")
 }

@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import "../../types/auth.js";
+import { authorize } from "../../plugins/auth-guard.js";
 import { ordersService } from "./orders.service.js";
 import {
   checkoutRequestSchema,
@@ -99,6 +100,7 @@ export const ordersRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post(
     "/:id/accept",
     {
+      preHandler: [authorize(["RESTAURANT_STAFF", "ADMIN"])],
       schema: {
         description: "Restaurant accepts order and begins preparation",
         tags: ["Orders"],
@@ -111,7 +113,7 @@ export const ordersRoutes: FastifyPluginAsync = async (fastify) => {
     },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const order = await ordersService.acceptOrder(request.user.id, id);
+      const order = await ordersService.acceptOrder(request.user.id, request.user.role, id);
       return reply.status(200).send(order);
     }
   );
@@ -119,6 +121,7 @@ export const ordersRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post(
     "/:id/ready",
     {
+      preHandler: [authorize(["RESTAURANT_STAFF", "ADMIN"])],
       schema: {
         description: "Restaurant marks order as ready for pickup",
         tags: ["Orders"],
@@ -131,7 +134,7 @@ export const ordersRoutes: FastifyPluginAsync = async (fastify) => {
     },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const order = await ordersService.markOrderReady(request.user.id, id);
+      const order = await ordersService.markOrderReady(request.user.id, request.user.role, id);
       return reply.status(200).send(order);
     }
   );
@@ -139,6 +142,7 @@ export const ordersRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post(
     "/:id/reject",
     {
+      preHandler: [authorize(["RESTAURANT_STAFF", "ADMIN"])],
       schema: {
         description: "Restaurant rejects incoming order with reason",
         tags: ["Orders"],
@@ -153,7 +157,7 @@ export const ordersRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = rejectOrderRequestSchema.parse(request.body);
-      const order = await ordersService.rejectOrder(request.user.id, id, body);
+      const order = await ordersService.rejectOrder(request.user.id, request.user.role, id, body);
       return reply.status(200).send(order);
     }
   );

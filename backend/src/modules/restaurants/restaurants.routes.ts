@@ -10,7 +10,7 @@ import {
   restaurantResponseSchema,
   paginatedRestaurantsResponseSchema,
 } from "./dto/restaurant.dto.js";
-import { requireRestaurantStaff } from "../../plugins/auth-guard.js";
+import { authorize, requireRestaurantStaff } from "../../plugins/auth-guard.js";
 
 export const restaurantsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get(
@@ -28,6 +28,25 @@ export const restaurantsRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const query = listRestaurantsQuerySchema.parse(request.query);
       const result = await restaurantsService.list(query);
+      return reply.status(200).send(result);
+    }
+  );
+
+  fastify.get(
+    "/mine",
+    {
+      preHandler: [fastify.authenticate, authorize(["RESTAURANT_STAFF", "ADMIN"])],
+      schema: {
+        description: "List restaurants the authenticated staff user or admin is authorized to manage (including pending applications)",
+        tags: ["Restaurants"],
+        security: [{ bearerAuth: [] }],
+        response: {
+          200: z.array(restaurantResponseSchema),
+        },
+      },
+    },
+    async (request, reply) => {
+      const result = await restaurantsService.listMine(request.user.id, request.user.role);
       return reply.status(200).send(result);
     }
   );
@@ -66,9 +85,9 @@ export const restaurantsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post(
     "/",
     {
-      preHandler: [fastify.authenticate],
+      preHandler: [fastify.authenticate, authorize(["RESTAURANT_STAFF", "ADMIN"])],
       schema: {
-        description: "Register a new restaurant (creates pending approval)",
+        description: "Register a new restaurant application (RESTAURANT_STAFF or ADMIN only)",
         tags: ["Restaurants"],
         security: [{ bearerAuth: [] }],
         body: createRestaurantRequestSchema,
@@ -79,7 +98,7 @@ export const restaurantsRoutes: FastifyPluginAsync = async (fastify) => {
     },
     async (request, reply) => {
       const body = createRestaurantRequestSchema.parse(request.body);
-      const result = await restaurantsService.create(request.user.id, body);
+      const result = await restaurantsService.create(request.user.id, request.user.role, body);
       return reply.status(201).send(result);
     }
   );

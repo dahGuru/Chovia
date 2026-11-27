@@ -1,25 +1,3 @@
 @import "tailwindcss";
-
-:root {
-  color-scheme: light;
-  --chovia-green: #235347;
-  --chovia-deep-green: #0d2621;
-  --chovia-gold: #d4af37;
-  --chovia-background: #f5f7f6;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-html,
-body {
-  min-height: 100%;
-}
-
-body {
-  margin: 0;
-  background: var(--chovia-background);
-  color: var(--chovia-deep-green);
-  font-family: Manrope, Arial, sans-serif;
-}
+@import "@chovia/web-ui/styles.css";
+@source "../../../packages/web-ui/src";

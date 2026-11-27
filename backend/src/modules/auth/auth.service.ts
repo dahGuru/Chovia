@@ -23,6 +23,8 @@ import type {
   RegisterRequestDto,
   RiderRegisterRequestDto,
   RiderRegisterResponseDto,
+  RestaurantRegisterRequestDto,
+  RestaurantRegisterResponseDto,
   LoginRequestDto,
   UserResponseDto,
   AuthResponseDto,
@@ -211,6 +213,62 @@ export class AuthService {
           emailDeliveryStatus === "SENT"
             ? "Rider registration successful. Please verify your email."
             : "Rider account created, but verification email could not be sent right now. Please tap Resend Code.",
+        signedToken,
+        expiresInMinutes: env.OTP_EXPIRES_IN_MINUTES,
+      },
+    };
+  }
+
+  async registerRestaurant(
+    dto: RestaurantRegisterRequestDto
+  ): Promise<RestaurantRegisterResponseDto> {
+    const existing = await prisma.user.findFirst({
+      where: {
+        OR: [{ email: dto.email }, { phone: dto.phone }],
+      },
+    });
+
+    if (existing) {
+      if (existing.email === dto.email) {
+        throw new ConflictError("Email is already registered");
+      }
+      throw new ConflictError("Phone number is already registered");
+    }
+
+    const passwordHash = await hashPassword(dto.password);
+    const fullName = `${dto.firstName} ${dto.lastName}`.trim();
+
+    const user = await prisma.user.create({
+      data: {
+        name: fullName,
+        email: dto.email,
+        phone: dto.phone,
+        passwordHash,
+        role: "RESTAURANT_STAFF",
+        status: "ACTIVE",
+        emailVerified: false,
+      },
+    });
+
+    const otp = generateNumericOtp();
+    const { signedToken } = createOtpSignature(dto.email, otp, "VERIFY_EMAIL");
+    await this.recordActiveOtpChallenge("VERIFY_EMAIL", dto.email, signedToken);
+    let emailDeliveryStatus: "SENT" | "FAILED_RETRYABLE" = "SENT";
+
+    try {
+      await emailService.sendVerificationEmail(dto.email, otp);
+    } catch {
+      emailDeliveryStatus = "FAILED_RETRYABLE";
+    }
+
+    return {
+      user: serializeUser(user),
+      emailDeliveryStatus,
+      otpData: {
+        message:
+          emailDeliveryStatus === "SENT"
+            ? "Restaurant partner account created. Please verify your email."
+            : "Restaurant partner account created, but verification email could not be sent right now. Please request a new code.",
         signedToken,
         expiresInMinutes: env.OTP_EXPIRES_IN_MINUTES,
       },

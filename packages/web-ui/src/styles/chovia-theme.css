@@ -1,0 +1,47 @@
+@theme {
+  --color-chovia-green: #235347;
+  --color-chovia-primary: #235347;
+  --color-chovia-deep: #0d2621;
+  --color-chovia-gold: #d4af37;
+  --color-chovia-background: #f5f7f6;
+  --color-chovia-card: #ffffff;
+  --color-chovia-muted: #52665f;
+  --color-chovia-subtle: #64786e;
+  --color-chovia-border: #e2ebe6;
+  --color-chovia-success: #10b981;
+  --color-chovia-warning: #f59e0b;
+  --color-chovia-error: #ef4444;
+  --font-sans: var(--font-manrope), "Manrope", system-ui, -apple-system, sans-serif;
+}
+
+:root {
+  color-scheme: light;
+  --chovia-green: #235347;
+  --chovia-deep-green: #0d2621;
+  --chovia-gold: #d4af37;
+  --chovia-background: #f5f7f6;
+  --chovia-card: #ffffff;
+  --chovia-muted: #52665f;
+  --chovia-subtle: #64786e;
+  --chovia-border: #e2ebe6;
+  --chovia-success: #10b981;
+  --chovia-warning: #f59e0b;
+  --chovia-error: #ef4444;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--chovia-background);
+  color: var(--chovia-deep-green);
+  font-family: var(--font-manrope), "Manrope", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}

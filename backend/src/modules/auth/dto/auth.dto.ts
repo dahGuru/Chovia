@@ -33,6 +33,9 @@ export type RegisterRequestDto = z.infer<typeof registerRequestSchema>;
 export const riderRegisterRequestSchema = registerRequestSchema;
 export type RiderRegisterRequestDto = z.infer<typeof riderRegisterRequestSchema>;
 
+export const restaurantRegisterRequestSchema = registerRequestSchema;
+export type RestaurantRegisterRequestDto = z.infer<typeof restaurantRegisterRequestSchema>;
+
 export const loginRequestSchema = z
   .object({
     email: z.string().email("Invalid email format").toLowerCase().trim(),
@@ -185,3 +188,13 @@ export const riderRegisterResponseSchema = z
   .strict();
 
 export type RiderRegisterResponseDto = z.infer<typeof riderRegisterResponseSchema>;
+
+export const restaurantRegisterResponseSchema = z
+  .object({
+    user: userResponseSchema,
+    otpData: otpSentResponseSchema,
+    emailDeliveryStatus: z.enum(["SENT", "FAILED_RETRYABLE"]),
+  })
+  .strict();
+
+export type RestaurantRegisterResponseDto = z.infer<typeof restaurantRegisterResponseSchema>;

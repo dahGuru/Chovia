@@ -4,7 +4,7 @@ import { v2 as cloudinary, type UploadApiOptions } from "cloudinary";
 import { env } from "../../config/env.js";
 import { BadRequestError, NotFoundError, PaymentGatewayError } from "../../common/errors/api-error.js";
 
-export type AllowedFolder = "menu" | "restaurants" | "avatars" | "documents";
+export type AllowedFolder = "menu" | "restaurants" | "avatars" | "documents" | "categories" | "cuisines";
 
 export function isPrivateOrBlockedIp(ipStr: string): boolean {
   let ip = ipStr.toLowerCase();
@@ -121,6 +121,22 @@ export const UPLOAD_POLICIES: Record<AllowedFolder, UploadPolicy> = {
     resourceType: "auto",
     deliveryType: "authenticated",
   },
+  categories: {
+    folder: "categories",
+    maxSizeBytes: 5 * 1024 * 1024, // 5MB
+    allowedMimeTypes: ["image/jpeg", "image/png", "image/webp"],
+    allowedFormats: ["jpg", "jpeg", "png", "webp"],
+    resourceType: "image",
+    deliveryType: "upload",
+  },
+  cuisines: {
+    folder: "cuisines",
+    maxSizeBytes: 5 * 1024 * 1024, // 5MB
+    allowedMimeTypes: ["image/jpeg", "image/png", "image/webp"],
+    allowedFormats: ["jpg", "jpeg", "png", "webp"],
+    resourceType: "image",
+    deliveryType: "upload",
+  },
 };
 
 export interface UploadSignatureResult {
@@ -204,6 +220,8 @@ const ALLOWED_FOLDERS: readonly AllowedFolder[] = [
   "restaurants",
   "avatars",
   "documents",
+  "categories",
+  "cuisines",
 ] as const;
 
 export class CloudinaryService {

@@ -489,6 +489,129 @@ paths:
                   - riderProfile
                   - emailDeliveryStatus
                 additionalProperties: false
+  /api/v1/auth/restaurant/register:
+    post:
+      tags:
+        - Auth
+      description: Register a new restaurant partner (RESTAURANT_STAFF) account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  maxLength: 255
+                  format: email
+                  pattern: ^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$
+                password:
+                  type: string
+                  minLength: 8
+                  maxLength: 100
+                  pattern: ^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).*$
+                firstName:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                lastName:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                phone:
+                  type: string
+                  pattern: ^\+[1-9]\d{7,14}$
+              required:
+                - email
+                - password
+                - firstName
+                - lastName
+                - phone
+              additionalProperties: false
+      responses:
+        "201":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                        pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                      email:
+                        type: string
+                        format: email
+                        pattern: ^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$
+                      role:
+                        type: string
+                        enum:
+                          - CUSTOMER
+                          - RESTAURANT_STAFF
+                          - RIDER
+                          - ADMIN
+                      status:
+                        type: string
+                        enum:
+                          - ACTIVE
+                          - SUSPENDED
+                          - DEACTIVATED
+                      emailVerified:
+                        type: boolean
+                      phoneVerified:
+                        type: boolean
+                      firstName:
+                        type:
+                          - string
+                          - "null"
+                      lastName:
+                        type:
+                          - string
+                          - "null"
+                      phone:
+                        type:
+                          - string
+                          - "null"
+                      createdAt:
+                        type: string
+                    required:
+                      - id
+                      - email
+                      - role
+                      - status
+                      - emailVerified
+                      - phoneVerified
+                      - createdAt
+                    additionalProperties: false
+                  otpData:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                      signedToken:
+                        type: string
+                      expiresInMinutes:
+                        type: number
+                    required:
+                      - message
+                      - signedToken
+                      - expiresInMinutes
+                    additionalProperties: false
+                  emailDeliveryStatus:
+                    type: string
+                    enum:
+                      - SENT
+                      - FAILED_RETRYABLE
+                required:
+                  - user
+                  - otpData
+                  - emailDeliveryStatus
+                additionalProperties: false
   /api/v1/auth/login:
     post:
       tags:
@@ -1300,6 +1423,8 @@ paths:
                     - restaurants
                     - menu
                     - documents
+                    - categories
+                    - cuisines
                 restaurantId:
                   type: string
                   format: uuid
@@ -1389,6 +1514,8 @@ paths:
                     - restaurants
                     - menu
                     - documents
+                    - categories
+                    - cuisines
                 restaurantId:
                   type: string
                   format: uuid
@@ -1464,6 +1591,8 @@ paths:
                     - restaurants
                     - menu
                     - documents
+                    - categories
+                    - cuisines
                 publicId:
                   type: string
                   minLength: 1
@@ -1584,6 +1713,14 @@ paths:
                           type:
                             - string
                             - "null"
+                        logoUrl:
+                          type:
+                            - string
+                            - "null"
+                        coverImageUrl:
+                          type:
+                            - string
+                            - "null"
                         phone:
                           type: string
                         email:
@@ -1611,6 +1748,12 @@ paths:
                             - OPEN
                             - CLOSED
                             - SUSPENDED
+                        manualClosure:
+                          type: boolean
+                        rejectionReason:
+                          type:
+                            - string
+                            - "null"
                         distanceKm:
                           type:
                             - number
@@ -1659,7 +1802,7 @@ paths:
     post:
       tags:
         - Restaurants
-      description: Register a new restaurant (creates pending approval)
+      description: Register a new restaurant application (RESTAURANT_STAFF or ADMIN only)
       requestBody:
         required: true
         content:
@@ -1731,6 +1874,14 @@ paths:
                     type:
                       - string
                       - "null"
+                  logoUrl:
+                    type:
+                      - string
+                      - "null"
+                  coverImageUrl:
+                    type:
+                      - string
+                      - "null"
                   phone:
                     type: string
                   email:
@@ -1758,6 +1909,12 @@ paths:
                       - OPEN
                       - CLOSED
                       - SUSPENDED
+                  manualClosure:
+                    type: boolean
+                  rejectionReason:
+                    type:
+                      - string
+                      - "null"
                   distanceKm:
                     type:
                       - number
@@ -1780,6 +1937,97 @@ paths:
                   - availability
                   - createdAt
                 additionalProperties: false
+  /api/v1/restaurants/mine:
+    get:
+      tags:
+        - Restaurants
+      description: List restaurants the authenticated staff user or admin is
+        authorized to manage (including pending applications)
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Default Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                      format: uuid
+                      pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                    name:
+                      type: string
+                    description:
+                      type:
+                        - string
+                        - "null"
+                    logoUrl:
+                      type:
+                        - string
+                        - "null"
+                    coverImageUrl:
+                      type:
+                        - string
+                        - "null"
+                    phone:
+                      type: string
+                    email:
+                      type:
+                        - string
+                        - "null"
+                    address:
+                      type: string
+                    latitude:
+                      type: number
+                    longitude:
+                      type: number
+                    maxDeliveryDistanceKm:
+                      type: number
+                    status:
+                      type: string
+                      enum:
+                        - PENDING_APPROVAL
+                        - ACTIVE
+                        - REJECTED
+                        - SUSPENDED
+                    availability:
+                      type: string
+                      enum:
+                        - OPEN
+                        - CLOSED
+                        - SUSPENDED
+                    manualClosure:
+                      type: boolean
+                    rejectionReason:
+                      type:
+                        - string
+                        - "null"
+                    distanceKm:
+                      type:
+                        - number
+                        - "null"
+                    cuisines:
+                      type: array
+                      items:
+                        type: string
+                    createdAt:
+                      type: string
+                  required:
+                    - id
+                    - name
+                    - phone
+                    - address
+                    - latitude
+                    - longitude
+                    - maxDeliveryDistanceKm
+                    - status
+                    - availability
+                    - createdAt
+                  additionalProperties: false
   /api/v1/restaurants/{id}:
     get:
       tags:
@@ -1821,6 +2069,14 @@ paths:
                     type:
                       - string
                       - "null"
+                  logoUrl:
+                    type:
+                      - string
+                      - "null"
+                  coverImageUrl:
+                    type:
+                      - string
+                      - "null"
                   phone:
                     type: string
                   email:
@@ -1848,6 +2104,12 @@ paths:
                       - OPEN
                       - CLOSED
                       - SUSPENDED
+                  manualClosure:
+                    type: boolean
+                  rejectionReason:
+                    type:
+                      - string
+                      - "null"
                   distanceKm:
                     type:
                       - number
@@ -1888,6 +2150,16 @@ paths:
                 description:
                   type: string
                   maxLength: 500
+                logoUrl:
+                  anyOf:
+                    - type: string
+                      format: uri
+                    - type: "null"
+                coverImageUrl:
+                  anyOf:
+                    - type: string
+                      format: uri
+                    - type: "null"
                 phone:
                   type: string
                   pattern: ^\+?[1-9]\d{7,14}$
@@ -1911,6 +2183,12 @@ paths:
                   type: number
                   exclusiveMinimum: 0
                   maximum: 30
+                cuisineIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
               additionalProperties: false
       parameters:
         - schema:
@@ -1937,6 +2215,14 @@ paths:
                   name:
                     type: string
                   description:
+                    type:
+                      - string
+                      - "null"
+                  logoUrl:
+                    type:
+                      - string
+                      - "null"
+                  coverImageUrl:
                     type:
                       - string
                       - "null"
@@ -1967,6 +2253,12 @@ paths:
                       - OPEN
                       - CLOSED
                       - SUSPENDED
+                  manualClosure:
+                    type: boolean
+                  rejectionReason:
+                    type:
+                      - string
+                      - "null"
                   distanceKm:
                     type:
                       - number
@@ -2040,6 +2332,14 @@ paths:
                     type:
                       - string
                       - "null"
+                  logoUrl:
+                    type:
+                      - string
+                      - "null"
+                  coverImageUrl:
+                    type:
+                      - string
+                      - "null"
                   phone:
                     type: string
                   email:
@@ -2067,6 +2367,12 @@ paths:
                       - OPEN
                       - CLOSED
                       - SUSPENDED
+                  manualClosure:
+                    type: boolean
+                  rejectionReason:
+                    type:
+                      - string
+                      - "null"
                   distanceKm:
                     type:
                       - number

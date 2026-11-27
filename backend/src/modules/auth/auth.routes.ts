@@ -6,6 +6,8 @@ import {
   registerRequestSchema,
   riderRegisterRequestSchema,
   riderRegisterResponseSchema,
+  restaurantRegisterRequestSchema,
+  restaurantRegisterResponseSchema,
   loginRequestSchema,
   refreshTokenRequestSchema,
   logoutRequestSchema,
@@ -64,6 +66,31 @@ export const authRoutes: FastifyPluginAsync = async (fastify) => {
     async (request, reply) => {
       const body = riderRegisterRequestSchema.parse(request.body);
       const result = await authService.registerRider(body);
+      return reply.status(201).send(result);
+    }
+  );
+
+  fastify.post(
+    "/restaurant/register",
+    {
+      config: {
+        rateLimit: {
+          max: 10,
+          timeWindow: "1 minute",
+        },
+      },
+      schema: {
+        description: "Register a new restaurant partner (RESTAURANT_STAFF) account",
+        tags: ["Auth"],
+        body: restaurantRegisterRequestSchema,
+        response: {
+          201: restaurantRegisterResponseSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const body = restaurantRegisterRequestSchema.parse(request.body);
+      const result = await authService.registerRestaurant(body);
       return reply.status(201).send(result);
     }
   );

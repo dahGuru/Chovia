@@ -413,15 +413,59 @@ export class OrdersService {
     return serializeOrder(updated);
   }
 
-  async acceptOrder(userId: string, orderId: string): Promise<OrderResponseDto> {
-    const order = await prisma.order.findUnique({ where: { id: orderId } });
+  private async verifyOrderRestaurantAccess(
+    userId: string,
+    userRole: string,
+    restaurantId: string
+  ): Promise<void> {
+    if (userRole === "ADMIN") {
+      return;
+    }
+
+    if (userRole !== "RESTAURANT_STAFF") {
+      throw new ForbiddenError("Only authorized restaurant staff or administrators can perform this action");
+    }
+
+    const membership = await prisma.restaurantStaffMembership.findFirst({
+      where: {
+        userId,
+        restaurantId,
+        status: "ACTIVE",
+      },
+    });
+
+    if (!membership) {
+      throw new ForbiddenError("You are not an active staff member of this restaurant");
+    }
+  }
+
+  async acceptOrder(
+    userId: string,
+    userRole: string,
+    orderId: string
+  ): Promise<OrderResponseDto> {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { customer: { select: { userId: true } } },
+    });
     if (!order) throw new NotFoundError("Order not found");
+
+    await this.verifyOrderRestaurantAccess(userId, userRole, order.restaurantId);
 
     if (order.status !== "CONFIRMED" && order.status !== "PENDING") {
       throw new BadRequestError(`Order in status ${order.status} cannot be accepted`);
     }
 
     const updated = await prisma.$transaction(async (tx) => {
+      const transitioned = await tx.order.updateMany({
+        where: { id: orderId, status: order.status },
+        data: { status: "PREPARING" },
+      });
+
+      if (transitioned.count === 0) {
+        throw new BadRequestError("Order status changed concurrently and can no longer be accepted");
+      }
+
       await tx.orderStatusHistory.create({
         data: {
           orderId,
@@ -431,9 +475,20 @@ export class OrdersService {
         },
       });
 
-      return tx.order.update({
+      if (order.customer?.userId) {
+        await tx.notification.create({
+          data: {
+            userId: order.customer.userId,
+            type: "ORDER_PREPARING",
+            title: "Order Being Prepared",
+            message: `Your order #${order.orderNumber} has been accepted and is now being prepared.`,
+            data: { orderId },
+          },
+        });
+      }
+
+      return tx.order.findUniqueOrThrow({
         where: { id: orderId },
-        data: { status: "PREPARING" },
         include: { items: true, restaurant: true, payment: true, statusHistory: true },
       });
     });
@@ -441,18 +496,33 @@ export class OrdersService {
     return serializeOrder(updated);
   }
 
-  async markOrderReady(userId: string, orderId: string): Promise<OrderResponseDto> {
+  async markOrderReady(
+    userId: string,
+    userRole: string,
+    orderId: string
+  ): Promise<OrderResponseDto> {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
-      include: { delivery: true },
+      include: { delivery: true, customer: { select: { userId: true } } },
     });
     if (!order) throw new NotFoundError("Order not found");
+
+    await this.verifyOrderRestaurantAccess(userId, userRole, order.restaurantId);
 
     if (order.status !== "PREPARING") {
       throw new BadRequestError(`Order in status ${order.status} cannot be marked ready`);
     }
 
     const updated = await prisma.$transaction(async (tx) => {
+      const transitioned = await tx.order.updateMany({
+        where: { id: orderId, status: "PREPARING" },
+        data: { status: "READY" },
+      });
+
+      if (transitioned.count === 0) {
+        throw new BadRequestError("Order status changed concurrently and cannot be marked ready");
+      }
+
       await tx.orderStatusHistory.create({
         data: {
           orderId,
@@ -468,9 +538,8 @@ export class OrdersService {
         data: { status: "READY" },
       });
 
-      const updatedOrder = await tx.order.update({
+      const updatedOrder = await tx.order.findUniqueOrThrow({
         where: { id: orderId },
-        data: { status: "READY" },
         include: {
           items: true,
           restaurant: true,
@@ -479,6 +548,18 @@ export class OrdersService {
           delivery: true,
         },
       });
+
+      if (order.customer?.userId) {
+        await tx.notification.create({
+          data: {
+            userId: order.customer.userId,
+            type: "ORDER_READY",
+            title: "Order Ready for Pickup",
+            message: `Your order #${order.orderNumber} is ready and awaiting rider pickup.`,
+            data: { orderId },
+          },
+        });
+      }
 
       // Schedule delivery dispatch via Transactional Outbox
       if (updatedOrder.delivery) {
@@ -511,17 +592,37 @@ export class OrdersService {
 
   async rejectOrder(
     userId: string,
+    userRole: string,
     orderId: string,
     dto: RejectOrderRequestDto
   ): Promise<OrderResponseDto> {
-    const order = await prisma.order.findUnique({ where: { id: orderId } });
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { customer: { select: { userId: true } } },
+    });
     if (!order) throw new NotFoundError("Order not found");
+
+    await this.verifyOrderRestaurantAccess(userId, userRole, order.restaurantId);
 
     if (order.status !== "CONFIRMED" && order.status !== "PENDING") {
       throw new BadRequestError(`Order in status ${order.status} cannot be rejected`);
     }
 
     const updated = await prisma.$transaction(async (tx) => {
+      const transitioned = await tx.order.updateMany({
+        where: { id: orderId, status: order.status },
+        data: {
+          status: "REJECTED",
+          rejectionReason: dto.reason,
+          rejectionNote: dto.note ?? null,
+          rejectedAt: new Date(),
+        },
+      });
+
+      if (transitioned.count === 0) {
+        throw new BadRequestError("Order status changed concurrently and cannot be rejected");
+      }
+
       await tx.orderStatusHistory.create({
         data: {
           orderId,
@@ -533,14 +634,20 @@ export class OrdersService {
         },
       });
 
-      return tx.order.update({
+      if (order.customer?.userId) {
+        await tx.notification.create({
+          data: {
+            userId: order.customer.userId,
+            type: "ORDER_REJECTED",
+            title: "Order Rejected",
+            message: `Your order #${order.orderNumber} was rejected by the restaurant: ${dto.reason}`,
+            data: { orderId },
+          },
+        });
+      }
+
+      return tx.order.findUniqueOrThrow({
         where: { id: orderId },
-        data: {
-          status: "REJECTED",
-          rejectionReason: dto.reason,
-          rejectionNote: dto.note ?? null,
-          rejectedAt: new Date(),
-        },
         include: { items: true, restaurant: true, payment: true, statusHistory: true },
       });
     });

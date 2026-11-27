@@ -48,6 +48,8 @@ async function verifyUploadAuthorization(
     } else if (folder !== "avatars") {
       throw new ForbiddenError("Restaurant staff are only authorized to upload avatars, restaurant, or menu assets");
     }
+  } else if (user.role !== "ADMIN") {
+    throw new ForbiddenError("You are not authorized to upload assets to this folder");
   }
 }
 

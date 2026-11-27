@@ -50,6 +50,8 @@ export const updateRestaurantRequestSchema = z
   .object({
     name: z.string().min(2).max(100).optional(),
     description: z.string().max(500).optional(),
+    logoUrl: z.string().url().nullable().optional(),
+    coverImageUrl: z.string().url().nullable().optional(),
     phone: z
       .string()
       .regex(AUTH_CONSTRAINTS.phone.pattern, AUTH_CONSTRAINTS.phone.message)
@@ -67,6 +69,7 @@ export const updateRestaurantRequestSchema = z
       .max(GEOSPATIAL_CONSTRAINTS.longitude.max)
       .optional(),
     maxDeliveryDistanceKm: z.number().positive().max(30).optional(),
+    cuisineIds: z.array(z.string().uuid()).optional(),
   })
   .strict();
 
@@ -86,6 +89,8 @@ export const restaurantResponseSchema = z
     id: z.string().uuid(),
     name: z.string(),
     description: z.string().nullable().optional(),
+    logoUrl: z.string().nullable().optional(),
+    coverImageUrl: z.string().nullable().optional(),
     phone: z.string(),
     email: z.string().nullable().optional(),
     address: z.string(),
@@ -94,6 +99,8 @@ export const restaurantResponseSchema = z
     maxDeliveryDistanceKm: z.number(),
     status: z.enum(["PENDING_APPROVAL", "ACTIVE", "REJECTED", "SUSPENDED"]),
     availability: z.enum(["OPEN", "CLOSED", "SUSPENDED"]),
+    manualClosure: z.boolean().optional(),
+    rejectionReason: z.string().nullable().optional(),
     distanceKm: z.number().nullable().optional(),
     cuisines: z.array(z.string()).optional(),
     createdAt: z.string(),

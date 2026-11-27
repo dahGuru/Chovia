@@ -42,7 +42,7 @@ export type DeviceResponseDto = z.infer<typeof deviceResponseSchema>;
 
 export const uploadSignatureRequestSchema = z
   .object({
-    folder: z.enum(["avatars", "restaurants", "menu", "documents"]),
+    folder: z.enum(["avatars", "restaurants", "menu", "documents", "categories", "cuisines"]),
     restaurantId: z.string().uuid().optional(),
     mimeType: z.enum(["image/jpeg", "image/png", "image/webp", "application/pdf"]).optional(),
     fileSizeBytes: z.number().int().positive().max(10 * 1024 * 1024).optional(),
@@ -72,7 +72,7 @@ export type UploadSignatureResponseDto = z.infer<typeof uploadSignatureResponseS
 export const uploadImageRequestSchema = z
   .object({
     file: z.string().min(1, "File payload (base64, data URI, or URL) is required"),
-    folder: z.enum(["avatars", "restaurants", "menu", "documents"]),
+    folder: z.enum(["avatars", "restaurants", "menu", "documents", "categories", "cuisines"]),
     restaurantId: z.string().uuid().optional(),
     mimeType: z.enum(["image/jpeg", "image/png", "image/webp", "application/pdf"]).optional(),
     fileSizeBytes: z.number().int().positive().max(10 * 1024 * 1024).optional(),
@@ -84,7 +84,7 @@ export type UploadImageRequestDto = z.infer<typeof uploadImageRequestSchema>;
 
 export const verifyUploadRequestSchema = z
   .object({
-    folder: z.enum(["avatars", "restaurants", "menu", "documents"]),
+    folder: z.enum(["avatars", "restaurants", "menu", "documents", "categories", "cuisines"]),
     publicId: z.string().min(1, "publicId is required"),
     format: z.string().optional(),
     bytes: z.number().int().positive().optional(),

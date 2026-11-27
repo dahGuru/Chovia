@@ -85,6 +85,10 @@ export class AdminService {
       updateData.approvedAt = new Date();
       updateData.approvedBy = adminUserId;
       updateData.availability = "OPEN";
+      updateData.rejectionReason = null;
+    } else if (dto.status === "REJECTED") {
+      updateData.availability = "CLOSED";
+      updateData.rejectionReason = dto.reason ?? null;
     } else if (dto.status === "SUSPENDED") {
       updateData.suspendedAt = new Date();
       updateData.suspendedBy = adminUserId;
